@@ -1,26 +1,65 @@
 @import "tailwindcss";
 
+/* 全画面共通の TekuMachi Pop Walk カラーパレットと形状。 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --background: #fff9f3;
+  --foreground: #342619;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plus-jakarta-sans), "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --color-brand: #ff7a00;
+  /* 小さい文字とフォーカスには、読みやすい濃いオレンジを使用。 */
+  --color-brand-ink: #9a4300;
+  --color-brand-soft: #fff1e3;
+  --color-accent: #ffdc70;
+  --color-accent-soft: #fff8dc;
+  --color-surface: #fffefd;
+  --color-surface-soft: #fffbf5;
+  --color-coral-soft: #ffe8df;
+  --color-coral-ink: #984632;
+  --color-action: #bd4b00;
+  --color-action-hover: #a13e00;
+  --color-muted: #746350;
+  --color-line: #eadfce;
+  --radius-card: 1.75rem;
+  --radius-control: 1.25rem;
+  --shadow-card: 0 6px 24px -8px rgb(111 65 15 / 10%);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+@layer base {
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* 共通UI。各画面では余白や配置のみを必要に応じて追加します。 */
+@layer components {
+  .mp-step { @apply inline-flex rounded-full bg-accent-soft px-4 py-2 text-xs font-bold tracking-widest text-brand-ink; }
+  .mp-title { @apply mt-4 text-3xl font-extrabold leading-snug tracking-tight sm:text-4xl; }
+  .mp-description { @apply mt-4 text-sm leading-7 text-muted; }
+  .mp-card { @apply min-w-0 rounded-card border border-line bg-surface p-5 shadow-card sm:p-7; }
+  .mp-notice { @apply rounded-control border border-accent bg-accent-soft p-4 text-sm leading-7; }
+  .mp-pill { @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-bold leading-5; }
+  .mp-required { @apply inline-flex shrink-0 items-center rounded-full bg-coral-soft px-3 py-1 text-xs font-bold text-coral-ink; }
+  .mp-number { @apply inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-extrabold text-brand-ink; }
+  .mp-section-title { @apply flex flex-wrap items-center gap-2 text-base font-bold sm:text-lg; }
+  .mp-section-description { @apply mb-5 mt-3 text-sm leading-7 text-muted; }
+  .mp-input { @apply min-h-12 w-full min-w-0 rounded-control border border-line bg-surface-soft px-4 py-3 text-base text-foreground placeholder:text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-ink; }
+  .mp-button-primary { @apply min-h-12 rounded-control bg-action px-5 py-3 text-sm font-bold text-white shadow-card hover:bg-action-hover focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-ink disabled:cursor-not-allowed disabled:opacity-50; }
+  .mp-button-secondary { @apply min-h-11 rounded-control border border-line bg-brand-soft px-4 py-2 text-sm font-bold text-brand-ink hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-ink; }
+  .mp-details { @apply grid gap-5 text-sm leading-7 sm:grid-cols-2; }
+  .mp-details > div { @apply min-w-0 rounded-control bg-surface-soft p-4; }
 }
