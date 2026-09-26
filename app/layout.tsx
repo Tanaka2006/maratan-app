@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "めぐりっぷ｜物語の場所から、まちを歩こう。",
+  title: "まちぽ｜物語の場所から、まちを歩こう。",
   description: "聖地と地域の魅力をつなぐ、まち歩きコース作成アプリ。",
   icons: { icon: "/app-icon.png", apple: "/app-icon.png" },
 };
