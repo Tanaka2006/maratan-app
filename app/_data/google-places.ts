@@ -97,7 +97,7 @@ function centroid(spots: readonly DetourAnchor[]) {
 
 /** Googleマップ グラウンディングに使うモデル。指定モデルが使えない場合に備え、順に試す。 */
 export function geminiDetourModels() {
-  return [...new Set([process.env.GEMINI_DETOUR_MODEL, "gemini-3.5-flash", "gemini-2.5-flash"].filter((model): model is string => Boolean(model)))];
+  return [...new Set([process.env.GEMINI_DETOUR_MODEL, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"].filter((model): model is string => Boolean(model)))];
 }
 
 const DETOUR_INSTRUCTION = [
@@ -140,8 +140,8 @@ async function geminiMapsCandidates(spots: readonly DetourAnchor[], region: stri
       method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey }, body,
       cache: "no-store", signal: AbortSignal.timeout(25_000),
     });
-    // モデル名が存在しない・グラウンディング非対応のときだけ次のモデルを試す。
-    if (response.ok || (response.status !== 400 && response.status !== 404)) break;
+    // モデルが存在しない・グラウンディング非対応・そのモデルの利用枠がないときは次のモデルを試す。
+    if (response.ok || ![400, 404, 429].includes(response.status)) break;
   }
   if (!response?.ok) return [];
   const data = await response.json() as {

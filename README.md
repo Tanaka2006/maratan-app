@@ -27,6 +27,8 @@ npm run check:apis  # .env.local のキーで Supabase・Places・Routes・Gemin
 
 `.env.example` を `.env.local` にコピーして値を入れてください。
 
+Gemini の「Google マップ グラウンディング」（寄り道探し）は、無料枠では使えない、または回数が少ない場合があります（`HTTP 429`）。その間も、寄り道は「Places の検索結果に Gemini が紹介文を付ける」予備の方法で探します。グラウンディングを使う場合は、Google AI Studio で課金を有効にしてください。
+
 | 変数 | 用途 | 置き場所 |
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 作品・聖地データベース | `.env.local` |

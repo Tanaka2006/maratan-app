@@ -62,8 +62,16 @@ await check("Routes API（地点間の移動時間）", ["GOOGLE_ROUTES_API_KEY"
   return `図書館→駅 徒歩 ${data.routes?.[0]?.duration ?? "経路なし"}`;
 });
 
+/** Google から返ったエラー文を短く取り出す（キーの値は含まれない）。 */
+async function reason(response) {
+  const body = await response.json().catch(() => null);
+  const message = body?.error?.message ? String(body.error.message).replace(/\s+/g, " ").slice(0, 160) : "";
+  return `HTTP ${response.status}${body?.error?.status ? ` ${body.error.status}` : ""}${message ? `（${message}）` : ""}`;
+}
+
+let groundingOk = false;
 await check("Gemini + Googleマップ グラウンディング（寄り道探し）", ["GEMINI_API_KEY"], async () => {
-  const models = [...new Set([env.GEMINI_DETOUR_MODEL, "gemini-3.5-flash", "gemini-2.5-flash"].filter(Boolean))];
+  const models = [...new Set([env.GEMINI_DETOUR_MODEL, "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"].filter(Boolean))];
   const errors = [];
   for (const model of models) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -74,14 +82,27 @@ await check("Gemini + Googleマップ グラウンディング（寄り道探し
         toolConfig: { retrievalConfig: { latLng: station, languageCode: "ja" } },
       }),
     });
-    if (!response.ok) { errors.push(`${model}: HTTP ${response.status}`); continue; }
+    if (!response.ok) { errors.push(`${model}: ${await reason(response)}`); continue; }
     const data = await response.json();
     const chunks = (data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []).filter((chunk) => chunk.maps?.placeId);
     if (!chunks.length) { errors.push(`${model}: Googleマップの根拠が返りませんでした`); continue; }
+    groundingOk = true;
     return `${model} で ${chunks.length} 件（例：${chunks[0].maps.title}）${model !== models[0] ? `／先に試したモデルは失敗：${errors.join("、")}` : ""}`;
   }
-  throw new Error(errors.join("、"));
+  throw new Error(errors.join("\n   "));
 });
 
+// グラウンディングが使えなくても、Places の検索結果に Gemini が紹介文を付ける予備の方法で寄り道を出せる。
+await check("Gemini（紹介文・おすすめコースの選択）", ["GEMINI_API_KEY"], async () => {
+  const model = env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "「飛騨の郷土料理」を10文字以内で説明してください。" }] }] }),
+  });
+  if (!response.ok) throw new Error(`${model}: ${await reason(response)}`);
+  return `${model} に接続できました`;
+});
+
+if (!groundingOk && placesKey) console.log("\n※ Googleマップ グラウンディングが使えない間も、寄り道は「Places の検索＋Gemini の紹介文」で探します（上の Gemini と Places が ✅ なら動きます）。\n  グラウンディングを使うには、Google AI Studio で課金（Paid tier）を有効にしてください。");
 console.log(failures ? `\n${failures} 件の確認に失敗しました。README の「環境変数」を確認してください。` : "\nすべての外部APIに接続できました。");
 process.exitCode = failures ? 1 : 0;
