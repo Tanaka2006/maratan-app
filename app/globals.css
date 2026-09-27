@@ -393,3 +393,32 @@ footer small { color: #cfc6c0; font-size: 12px; }
 .review-summary p { color: #4f4640; display: -webkit-box; font-size: 13px; line-height: 1.7; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .review-summary small { color: var(--muted); display: block; font-size: 11px; margin-top: 2px; }
 .review-summary a { color: var(--orange-deep); font-weight: 700; }
+.search-mode-tabs { background: #f4efea; border-radius: 999px; display: inline-flex; gap: 4px; margin-bottom: 14px; padding: 4px; }
+.search-mode-tabs button { background: transparent; border: 0; border-radius: 999px; color: var(--muted); cursor: pointer; font-size: 14px; font-weight: 800; min-height: 40px; padding: 6px 18px; }
+.search-mode-tabs button.is-active { background: #fff; box-shadow: var(--shadow-sm); color: var(--orange-deep); }
+.detour-search-section { margin-bottom: 8px; }
+.detour-search-form { background: #fff; margin-bottom: 18px; }
+.detour-search-form button { background: var(--orange); border: 0; border-radius: 10px; color: #fff; cursor: pointer; flex: 0 0 auto; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 16px; }
+.detour-search-form button:disabled { background: #ddd6d1; color: #7d746e; cursor: not-allowed; }
+.detour-result .work-version { align-items: center; display: flex; gap: 8px; }
+.detour-result-text { color: #4f4640; font-size: 14px; line-height: 1.7; margin: 6px 0 0; }
+.sr-only { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
+.example-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 8px; }
+.example-chips button { background: #fff; border: 1px solid var(--line-strong); border-radius: 999px; color: #574e48; cursor: pointer; font-size: 13px; font-weight: 700; min-height: 34px; padding: 4px 14px; }
+.example-chips button:hover:not(:disabled) { border-color: var(--orange); color: var(--orange-deep); }
+.detour-search-section > .field-hint { margin: 0 0 16px; }
+.detour-result-address { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
+.detour-result-map { color: var(--orange-deep); display: inline-block; font-size: 13px; font-weight: 700; margin-top: 4px; }
+.plan-summary { background: #fff; border: 2px solid #a9d3c0; border-radius: 12px; margin: 0 0 12px; padding: 10px 14px; }
+.plan-summary p { color: var(--green); font-size: 14px; font-weight: 800; margin: 0; }
+.plan-summary b { color: var(--ink); font-size: 22px; margin-left: 4px; }
+.plan-summary small { color: var(--muted); display: block; font-size: 12px; line-height: 1.6; margin-top: 2px; }
+.share-course { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 10px; }
+.share-course .secondary-button { margin-top: 0; min-height: 44px; }
+.share-course span { color: var(--green); font-size: 13px; font-weight: 700; }
+.research-course-result .share-course .secondary-button { width: 100%; }
+.not-found-page { margin: 0 auto; max-width: 560px; padding: 80px 20px; text-align: center; }
+.not-found-page h1 { font-size: 26px; margin: 0 0 10px; }
+.not-found-page p { color: var(--muted); line-height: 1.8; }
+.plan-summary b { white-space: nowrap; }
+.research-course-result { scroll-margin-top: 84px; }

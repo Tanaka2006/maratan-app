@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchedWork, VerifiedLeg, VerifiedSpot } from "../_data/anilist-types";
 import type { ResearchCatalog, ResearchWork } from "../_data/research-works";
 import { displayVersion, matchesGenre, workTypeLabel, type GenreFilter } from "../_data/work-genres";
+import { courseUrl, readCourseUrl, type CourseOptions } from "../_data/course-url";
 import AniListLookup from "./anilist-lookup";
+import DetourSearch from "./detour-search";
 import ResearchCourse from "./research-course";
 import VerifiedSpotMap from "./verified-spot-map";
 
@@ -14,6 +16,7 @@ type VerifiedSelection = {
   spots: VerifiedSpot[];
   legs: VerifiedLeg[];
   region: string;
+  options?: CourseOptions;
 };
 
 type PublishedWork = MatchedWork & { category: string | null; spotCounts?: Record<string, number> };
@@ -27,14 +30,7 @@ function normalizeSearch(value: string) {
 }
 
 function readUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const workId = params.get("work");
-  const region = params.get("region");
-  return workId && region ? { workId, region } : null;
-}
-
-function courseUrl(workId: string, region: string) {
-  return `?${new URLSearchParams({ work: workId, region })}`;
+  return readCourseUrl(window.location.search);
 }
 
 function SearchIcon() {
@@ -47,9 +43,10 @@ function PinIcon() {
 
 export default function PlannerApp({ researchCatalog }: { researchCatalog: ResearchCatalog }) {
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<"works" | "detours">("works");
   const [genreFilter, setGenreFilter] = useState<GenreFilter>("すべて");
   const [selection, setSelection] = useState<VerifiedSelection | null>(null);
-  const [researchSelection, setResearchSelection] = useState<{ work: ResearchWork; region: string } | null>(null);
+  const [researchSelection, setResearchSelection] = useState<{ work: ResearchWork; region: string; options?: CourseOptions } | null>(null);
   const [publishedWorks, setPublishedWorks] = useState<PublishedWork[]>([]);
   const [publishedStatus, setPublishedStatus] = useState<"loading" | "ready" | "error">("loading");
   const [openingKey, setOpeningKey] = useState("");
@@ -88,7 +85,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
     requestAnimationFrame(() => window.scrollTo({ top: saved }));
   }, []);
 
-  const loadWork = useCallback(async (workId: string, region: string) => {
+  const loadWork = useCallback(async (workId: string, region: string, options: CourseOptions = {}) => {
     setOpenError("");
     const work = researchCatalog.works.find((item) => item.id === workId);
     const published = publishedRef.current.find((item) => item.id === workId);
@@ -99,7 +96,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
         const data = await response.json();
         if (!response.ok || !Array.isArray(data.spots) || !data.spots.length) throw new Error(data.error || "地図に表示できる聖地がありません。");
         setResearchSelection(null);
-        setSelection({ work: published, spots: data.spots, legs: data.legs, region });
+        setSelection({ work: published, spots: data.spots, legs: data.legs, region, options });
         showCourse(published.title, region);
         return true;
       } catch (error) {
@@ -109,7 +106,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
     }
     if (work?.regions.includes(region)) {
       setSelection(null);
-      setResearchSelection({ work, region });
+      setResearchSelection({ work, region, options });
       showCourse(work.title, region);
       return true;
     }
@@ -117,10 +114,10 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
     return false;
   }, [researchCatalog.works, showCourse]);
 
-  async function openWork(workId: string, region: string) {
+  async function openWork(workId: string, region: string, options: CourseOptions = {}) {
     listScroll.current = window.scrollY;
-    const opened = await loadWork(workId, region);
-    if (opened) window.history.pushState({ machipo: true }, "", courseUrl(workId, region));
+    const opened = await loadWork(workId, region, options);
+    if (opened) window.history.pushState({ machipo: true }, "", courseUrl(workId, region, options));
   }
 
   // 対応作品を取得したあと、共有URL・再読み込みで指定された画面を開く。
@@ -129,7 +126,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
     function openFromUrl() {
       const target = readUrl();
       if (!target) return;
-      void loadWork(target.workId, target.region).then((opened) => {
+      void loadWork(target.workId, target.region, target.options).then((opened) => {
         if (!opened) window.history.replaceState(null, "", window.location.pathname);
       });
     }
@@ -156,7 +153,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
   useEffect(() => {
     function onPopState() {
       const target = readUrl();
-      if (target) void loadWork(target.workId, target.region);
+      if (target) void loadWork(target.workId, target.region, target.options);
       else clearCourse();
     }
     window.addEventListener("popstate", onPopState);
@@ -200,15 +197,20 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
       </header>
 
       <main>
-        {selection ? (
-          <VerifiedSpotMap key={`${selection.work.id}/${selection.region}`} work={selection.work} spots={selection.spots} region={selection.region} onBack={backToList} />
-        ) : researchSelection ? (
-          <ResearchCourse key={`${researchSelection.work.id}/${researchSelection.region}`} work={researchSelection.work} region={researchSelection.region} onBack={backToList} />
-        ) : (
+        {selection ? <VerifiedSpotMap key={`${selection.work.id}/${selection.region}/${selection.options?.pin ?? ""}/${selection.options?.spots?.join(",") ?? ""}`} work={selection.work} spots={selection.spots} region={selection.region} options={selection.options} onBack={backToList} /> : null}
+        {!selection && researchSelection ? <ResearchCourse key={`${researchSelection.work.id}/${researchSelection.region}/${researchSelection.options?.pin ?? ""}/${researchSelection.options?.spots?.join(",") ?? ""}`} work={researchSelection.work} region={researchSelection.region} options={researchSelection.options} onBack={backToList} /> : null}
+        {/* 一覧・検索結果は、コース画面を開いている間も残しておき、戻ったときにそのまま見られるようにする。 */}
+        <div hidden={Boolean(selection || researchSelection)}>
           <section className="screen-section intro-section">
             <h1><span>あの物語の場所から、</span><span><em>まちの魅力</em>へ。</span></h1>
-            <p className="lead">作品を選ぶだけで、聖地めぐりと、途中で寄れる地元の味・文化スポットをつないだコースを作れます。</p>
+            <p className="lead">好きな作品の聖地と、その間で寄れる地元の味・文化スポットをつないだコースを作れます。食べたいもの・買いたいものから探すこともできます。</p>
 
+            <div className="search-mode-tabs" role="tablist" aria-label="探し方">
+              <button type="button" role="tab" aria-selected={searchMode === "works"} className={searchMode === "works" ? "is-active" : ""} onClick={() => setSearchMode("works")}>作品から探す</button>
+              <button type="button" role="tab" aria-selected={searchMode === "detours"} className={searchMode === "detours" ? "is-active" : ""} onClick={() => setSearchMode("detours")}>食・お店から探す</button>
+            </div>
+
+            {searchMode === "detours" ? <DetourSearch onOpen={(workId, region, pin) => void openWork(workId, region, { pin })} openingKey={openingKey} /> : <>
             <div className="search-panel">
               <label htmlFor="work-search">作品名や地域から探す</label>
               <div className="search-controls">
@@ -254,6 +256,8 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
 
               {!filtering && matchingWorks.length > visibleWorks.length ? <button className="more-button" type="button" onClick={() => setShowAll(true)}>すべての作品を見る（全{matchingWorks.length}作品）</button> : null}
             </section>
+            </>}
+            {searchMode === "detours" && openError ? <p className="inline-error" role="alert">{openError}</p> : null}
 
             <details className="detail-disclosure scope-disclosure"><summary>コースの作り方と注意点</summary><div className="disclosure-body">
               <p>作品と地域を選び、巡りたい聖地を最大3件選ぶと、訪問順の案を作ります。聖地の間や前後で寄れる地元の味・文化スポットは、AI（Gemini）がGoogleマップの情報から探します。</p>
@@ -261,7 +265,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
               <p>学校・住宅地・施設の敷地には許可なく立ち入らず、出発前に公式情報とGoogleマップで確認してください。</p>
             </div></details>
           </section>
-        )}
+        </div>
       </main>
 
       <footer><div><Image src="/app-icon.png" alt="" width={38} height={34} /><strong>まちぽ</strong></div><p>物語とまちを、やさしくつなぐ。</p><small>訪問前に各施設の公式情報と当日の経路をご確認ください。</small></footer>

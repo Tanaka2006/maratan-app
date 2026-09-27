@@ -8,6 +8,8 @@ import { displayVersion } from "../_data/work-genres";
 import DetourCard, { DetourBadge, DetourNote, pickRecommendedDetours } from "./detour-card";
 import GoogleSpotMap from "./google-spot-map";
 import LegSummary from "./leg-summary";
+import ShareCourse from "./share-course";
+import { courseUrl, sharedSelection, type CourseOptions } from "../_data/course-url";
 import type { LegOption, TransitKind } from "../_data/transit-label";
 
 type ApiLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null;
@@ -18,7 +20,7 @@ type ItineraryResult = { course: ApiCourse; recommendation: { id: string; reason
 const MAX_SPOTS = 3;
 const MAX_DETOURS = 2;
 const LONG_WALK_METERS = 3000;
-type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; source?: "gemini-maps" | "places-search" | "mixed" | "none"; routable?: boolean };
+type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; source?: "gemini-maps" | "places-search" | "mixed" | "none"; routable?: boolean; pinned?: "included" | "out-of-reach" | "none" };
 
 const DURATION_OPTIONS = [60, 90, 120, 150, 180, 210, 240, 300, 360, 420, 480, 600, 720];
 
@@ -71,7 +73,8 @@ function formatYen(value: number | null) {
   return value === null ? "不明" : value === 0 ? "0円" : `${value.toLocaleString()}円`;
 }
 
-export default function VerifiedSpotMap({ work, spots, region, onBack }: {
+export default function VerifiedSpotMap({ work, spots, region, options, onBack }: {
+  options?: CourseOptions;
   work: MatchedWork;
   spots: VerifiedSpot[];
   region: string;
@@ -79,7 +82,9 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
 }) {
   const regionSpots = useMemo(() => spots.filter((spot) => spot.region === region), [spots, region]);
   const [activeId, setActiveId] = useState(regionSpots[0]?.id ?? "");
-  const [selectedIds, setSelectedIds] = useState(regionSpots.map((spot) => spot.id).slice(0, MAX_SPOTS));
+  // 共有リンクで聖地が指定されていれば、その並びで始める。
+  const [selectedIds, setSelectedIds] = useState(() => sharedSelection(options?.spots, regionSpots.map((spot) => spot.id), MAX_SPOTS)
+    ?? regionSpots.map((spot) => spot.id).slice(0, MAX_SPOTS));
   const [visitDate, setVisitDate] = useState(todayInJapan);
   const [availableMinutes, setAvailableMinutes] = useState(180);
   const [stayMinutes, setStayMinutes] = useState<Record<string, number>>({});
@@ -122,14 +127,14 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
     setDetourState({ status: "loading" });
     try {
       const response = await fetch("/api/detours", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workId: work.id, region, spotIds, visitDate }) });
+        body: JSON.stringify({ workId: work.id, region, spotIds, visitDate, ...(options?.pin ? { pinPlaceId: options.pin } : {}) }) });
       const data = await response.json();
       if (detourKey.current !== key) return null;
       if (!response.ok) throw new Error(data.error || "寄り道候補を取得できませんでした。");
       const found: VerifiedDetour[] = Array.isArray(data.detours) ? data.detours : [];
       const routable = data.routable !== false;
       setDetours(found);
-      setDetourState({ status: "ready", source: data.source, routable });
+      setDetourState({ status: "ready", source: data.source, routable, pinned: data.pinned === "included" || data.pinned === "out-of-reach" ? data.pinned : "none" });
       return { detours: found, routable };
     } catch (error) {
       if (detourKey.current !== key) return null;
@@ -283,6 +288,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           <label>現地で使える時間<select value={availableMinutes} onChange={(event) => { setAvailableMinutes(Number(event.target.value)); invalidateResult(); }}>{DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{formatMinutes(minutes)}</option>)}</select><span className="field-hint">1か所目に着いてから、最後の場所を出るまで</span></label>
         </div>
         {selectedSpots.length ? <details className="detail-disclosure stay-disclosure"><summary>滞在時間を変える</summary><div className="verified-course-fields">{[...selectedSpots, ...selectedDetours].map((spot) => <label key={spot.id}>{spot.name}<span className="input-with-unit"><input type="number" inputMode="numeric" min="5" max="180" step="5" value={Number.isFinite(stayOf(spot)) ? stayOf(spot) : ""} onChange={(event) => { setStayMinutes((current) => ({ ...current, [spot.id]: event.target.value === "" ? Number.NaN : Number(event.target.value) })); invalidateResult(); }} />分</span></label>)}</div></details> : null}
+        {options?.pin ? <p className="detour-included">「食・お店から探す」で選んだお店を、<b>寄り道</b>としてコースに入れます。</p> : null}
         <button className="primary-button" type="button" disabled={!canCreate} aria-describedby={problems.length ? "plan-problems" : undefined} onClick={() => void createCourse()}>{creating ? detourState.status === "loading" ? "地域の寄り道を探しています…" : "経路を調べています…" : "コースを作る"}</button>
         {problems.length ? <ul id="plan-problems" className="form-problems">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : null}
         {createError ? <p className="inline-error" role="alert">{createError}</p> : null}
@@ -296,6 +302,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           <p>{statusView.detail}</p>
         </div>
         {hasDetourInCourse ? <p className="detour-included">聖地の区間の途中で、地元の味や文化にふれられる<b>寄り道</b>を入れています。不要なら「✕ 外す」で外せます。</p> : null}
+        {detourState.pinned === "out-of-reach" ? <p className="field-hint">選んだお店は聖地から離れているため、コースには入れていません。</p> : null}
 
         <ol className="course-stops">{result.course.stops.map((spot, index) => {
           const leg = result.course.legs[index];
@@ -325,6 +332,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           </li>;
         })}</ol>
         {allWalking && result.course.stops.length > 1 ? <a className="secondary-button" href={walkingRouteUrl(result.course.stops)} target="_blank" rel="noreferrer">この順番でGoogleマップを開く ↗</a> : null}
+        <ShareCourse path={courseUrl(work.id, region, { spots: selectedIds, pin: options?.pin })} title={`${work.title}・${region}のコース`} />
 
         <details className="detail-disclosure result-disclosure"><summary>出発前の確認事項（{checks.length}件）</summary><div className="disclosure-body">
           <ul className="check-list">{checks.map((check) => <li key={check}>{check}</li>)}</ul>

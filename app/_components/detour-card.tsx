@@ -10,7 +10,11 @@ import { isKnownClosed } from "../_data/real-planner";
  */
 export function pickRecommendedDetours(detours: readonly VerifiedDetour[], visitDate: string, limit: number) {
   const open = detours.filter((spot) => !isKnownClosed(spot, visitDate));
-  return [open.find((spot) => spot.category === "food"), open.find((spot) => spot.category !== "food"), ...open]
+  // 「食・お店から探す」で選んだ店があれば最優先にし、残りで食と文化の両方がそろうようにする。
+  const pinned = open.find((spot) => spot.pinned);
+  const needFood = !pinned || pinned.category !== "food";
+  return [pinned, needFood ? open.find((spot) => spot.category === "food" && spot !== pinned) : open.find((spot) => spot.category !== "food" && spot !== pinned),
+    open.find((spot) => spot.category !== "food" && spot !== pinned), ...open]
     .filter((spot): spot is VerifiedDetour => Boolean(spot)).map((spot) => spot.id)
     .filter((id, index, list) => list.indexOf(id) === index).slice(0, Math.max(0, limit));
 }
@@ -38,7 +42,7 @@ export default function DetourCard({ spot, checked, disabled, closed, visitDate,
       <input type="checkbox" checked={checked} disabled={disabled} onChange={onToggle} />
       <span className="detour-card-text">
         <span className="detour-card-title"><DetourBadge spot={spot} /><strong>{spot.name}</strong></span>
-        {spot.local_feature ? <span className="detour-feature">{spot.local_feature}</span> : null}
+        {spot.local_feature ? <span className="detour-feature">{spot.local_feature}</span> : spot.pinned ? <span className="detour-feature">あなたが探したお店</span> : null}
         <small>滞在 約{spot.stay_minutes}分</small>
         {closed ? <small className="detour-closed">選んだ日は定休日の可能性があります</small> : null}
       </span>

@@ -164,3 +164,33 @@ test("グラウンディングの名前がローマ字でも、Places の日本�
   const english = matchGroundedPicks([{ name: "Ajidokoro Furukawa", localFeature: "飛騨の郷土料理", reason: "駅から近い" }], [{ ...grounded[0], aliases: undefined }]);
   assert.equal(english.length, 1);
 });
+
+test("食・お店の検索：地域の判定と、AIが選んだ地域の検査", async () => {
+  const { addressInRegion, regionsMatchingText, pickKnownRegions, categoryForWord, cleanQuery } = await import("../app/_data/food-search.ts");
+  const regions = ["岩手県・久慈市", "岐阜県・飛騨市", "岐阜県・高山市", "北海道・礼文町"];
+  assert.equal(addressInRegion("日本、〒028-0021 岩手県久慈市中町２丁目", "岩手県・久慈市"), true);
+  assert.equal(addressInRegion("日本、〒099-0000 北海道礼文郡礼文町香深", "北海道・礼文町"), true);
+  assert.equal(addressInRegion("日本、〒020-0000 岩手県盛岡市", "岩手県・久慈市"), false, "同じ県でも別の市は除く");
+  assert.equal(addressInRegion(null, "岩手県・久慈市"), false);
+  assert.deepEqual(regionsMatchingText("飛騨", regions), ["岐阜県・飛騨市"]);
+  assert.deepEqual(regionsMatchingText("久慈市", regions), ["岩手県・久慈市"]);
+  assert.deepEqual(regionsMatchingText("岐阜", regions), ["岐阜県・飛騨市", "岐阜県・高山市"]);
+  assert.deepEqual(regionsMatchingText("うに", regions), []);
+  assert.deepEqual(pickKnownRegions(["岩手県・久慈市", "架空県・架空市", "岩手県・久慈市", 3], regions), ["岩手県・久慈市"]);
+  assert.deepEqual(pickKnownRegions({ regions: ["北海道・礼文町"] }, regions), ["北海道・礼文町"]);
+  assert.equal(categoryForWord("お土産"), "shopping");
+  assert.equal(categoryForWord("うに"), null);
+  assert.equal(cleanQuery(" 地酒,(*) "), "地酒");
+});
+
+test("共有リンク：作品・地域・聖地の並び・選んだ店を URL で受け渡す", async () => {
+  const { courseUrl, readCourseUrl, sharedSelection } = await import("../app/_data/course-url.ts");
+  const url = courseUrl("w_abc", "岐阜県・飛騨市", { spots: ["p_b", "p_a"], pin: "ChIJaaaaaaaaaaaaaaaa" });
+  const read = readCourseUrl(url);
+  assert.deepEqual(read, { workId: "w_abc", region: "岐阜県・飛騨市", options: { pin: "ChIJaaaaaaaaaaaaaaaa", spots: ["p_b", "p_a"] } });
+  assert.deepEqual(readCourseUrl("?work=w_abc&region=x&spots=<script>,p_a&pin=bad").options, { pin: undefined, spots: ["p_a"] });
+  assert.equal(readCourseUrl("?work=w_abc"), null);
+  assert.deepEqual(sharedSelection(["p_b", "p_x", "p_b", "p_a"], ["p_a", "p_b", "p_c"]), ["p_b", "p_a"]);
+  assert.equal(sharedSelection(["p_x"], ["p_a"]), null);
+  assert.equal(sharedSelection(undefined, ["p_a"]), null);
+});
