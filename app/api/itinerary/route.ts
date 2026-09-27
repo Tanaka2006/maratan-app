@@ -1,7 +1,7 @@
 import type { VerifiedLeg, VerifiedSpot } from "../../_data/anilist-types";
 import { isKnownClosed, type VerifiedCourse } from "../../_data/real-planner";
 import { detourFromPlace, fetchPlaceDetails, placesApiKey } from "../../_data/google-places";
-import { isPlaceId, isWithinReach } from "../../_data/local-detours";
+import { bestAxisOrder, isPlaceId, isWithinReach } from "../../_data/local-detours";
 
 export const runtime = "nodejs";
 
@@ -228,7 +228,12 @@ export async function POST(request: Request) {
           byPair.set(`${leg.from_spot_id}/${leg.to_spot_id}`, { ...leg, walkingMeters: null, fareYen: null, source: "registered" });
       }
     }
-    const candidateStops = permutations(stops);
+    // 聖地を軸にする：聖地の訪問順ごとに、寄り道は聖地と聖地の区間の中で移動が最も短くなる位置に入れる。
+    const byId = new Map(stops.map((spot) => [spot.id, spot]));
+    const candidateStops = permutations(spots.map((spot) => spot.id)).flatMap((seichiOrder) => {
+      const best = bestAxisOrder(seichiOrder, detours.map((spot) => spot.id), (from, to) => byPair.get(`${from}/${to}`)?.minutes ?? null);
+      return best ? [best.order.map((id) => byId.get(id)!)] : [];
+    });
     const courses: Course[] = candidateStops.flatMap((ordered) => {
       const courseLegs = ordered.slice(0, -1).map((spot, index) => byPair.get(`${spot.id}/${ordered[index + 1].id}`));
       if (courseLegs.some((leg) => !leg)) return [];

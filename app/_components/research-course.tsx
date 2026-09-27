@@ -1,18 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { VerifiedDetour } from "../_data/anilist-types";
-import { DETOUR_CATEGORY_LABELS, insertDetours } from "../_data/local-detours";
+import { bestAxisOrder, DETOUR_CATEGORY_LABELS, metersBetween } from "../_data/local-detours";
 import { isKnownClosed } from "../_data/real-planner";
 import type { ResearchWork } from "../_data/research-works";
 import type { ResearchSpot } from "../_data/research-spots";
 import { displayVersion } from "../_data/work-genres";
-import DetourCard, { DetourNote } from "./detour-card";
+import DetourCard, { DetourNote, pickRecommendedDetours } from "./detour-card";
 
 const MAX_STOPS = 3;
 const MAX_DETOURS = 2;
 
 type Anchor = { id: string; latitude: number; longitude: number; placeId: string; mapsUri: string | null };
+type DetourSearch = { detours: VerifiedDetour[]; anchors: Anchor[]; unlocated: string[] };
 type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; unlocated?: string[] };
 /** 経路リンクに渡す1地点。聖地は名称で、位置を特定できた地点と寄り道は Place ID も渡す。 */
 type RoutePoint = { id: string; name: string; query: string; placeId: string | null; detour: VerifiedDetour | null };
@@ -85,6 +86,8 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
   const [detourState, setDetourState] = useState<DetourState>({ status: "idle" });
   const [selectedDetourIds, setSelectedDetourIds] = useState<string[]>([]);
   const detourKey = useRef("");
+  const detourCache = useRef(new Map<string, DetourSearch>());
+  const visitDateRef = useRef(visitDate);
   const version = displayVersion(work.version);
 
   useEffect(() => {
@@ -101,39 +104,60 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
     return () => controller.abort();
   }, [work.id, region, attempt]);
 
-  function resetDetours() {
-    detourKey.current = "";
-    setDetours([]);
-    setAnchors([]);
-    setSelectedDetourIds([]);
-    setDetourState({ status: "idle" });
-  }
+  // 地点の並び順に関係なく、同じ組み合わせなら同じ寄り道を使う。
+  const selectionKey = [...selectedIds].sort().join(",");
 
   function toggleSpot(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < MAX_STOPS ? [...current, id] : current);
-    resetDetours();
   }
 
-  // 選んだ地点の間・前後で、地域の食・文化にふれられる寄り道を Gemini と Google マップから探す。
-  async function searchDetours() {
-    const key = selectedIds.join(",");
+  // 選んだ地点の区間で、地域の食・文化にふれられる寄り道を Gemini と Google マップから探す。
+  // 見つかったら、おすすめを最初から訪問順の案に入れる（不要なら外せる）。
+  const searchDetours = useCallback(async (ids: string[], key: string) => {
     detourKey.current = key;
+    const apply = (found: DetourSearch) => {
+      setDetours(found.detours);
+      setAnchors(found.anchors);
+      setSelectedDetourIds(pickRecommendedDetours(found.detours, visitDateRef.current, MAX_DETOURS));
+      setDetourState({ status: "ready", unlocated: found.unlocated });
+    };
+    const cached = detourCache.current.get(key);
+    if (cached) { apply(cached); return; }
+    setDetours([]);
+    setAnchors([]);
+    setSelectedDetourIds([]);
     setDetourState({ status: "loading" });
     try {
       const response = await fetch("/api/detours", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workId: work.id, region, researchSpotIds: selectedIds, visitDate }) });
+        body: JSON.stringify({ workId: work.id, region, researchSpotIds: ids, visitDate: visitDateRef.current }) });
       const data = await response.json();
       if (detourKey.current !== key) return;
       if (!response.ok) throw new Error(data.error || "寄り道候補を取得できませんでした。");
-      setDetours(Array.isArray(data.detours) ? data.detours : []);
-      setAnchors(Array.isArray(data.anchors) ? data.anchors : []);
-      setSelectedDetourIds([]);
-      setDetourState({ status: "ready", unlocated: Array.isArray(data.unlocated) ? data.unlocated : [] });
+      const found: DetourSearch = { detours: Array.isArray(data.detours) ? data.detours : [], anchors: Array.isArray(data.anchors) ? data.anchors : [],
+        unlocated: Array.isArray(data.unlocated) ? data.unlocated : [] };
+      detourCache.current.set(key, found);
+      apply(found);
     } catch (fetchError) {
       if (detourKey.current !== key) return;
-      detourKey.current = "";
       setDetourState({ status: "error", message: fetchError instanceof Error ? fetchError.message : "寄り道候補を取得できませんでした。" });
     }
+  }, [work.id, region]);
+
+  // 地点の選択が落ち着いたら自動で探す（チェックを続けて付け外ししている間は待つ）。
+  useEffect(() => {
+    if (!selectedIds.length || detourKey.current === selectionKey) return;
+    const ids = [...selectedIds];
+    const timer = window.setTimeout(() => void searchDetours(ids, selectionKey), 700);
+    return () => window.clearTimeout(timer);
+    // 並び替えだけでは探し直さない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey, searchDetours]);
+
+  function changeVisitDate(date: string) {
+    setVisitDate(date);
+    visitDateRef.current = date;
+    // 選んだ日が定休日の寄り道は、訪問順の案から外す。
+    setSelectedDetourIds((current) => current.filter((id) => { const spot = detours.find((item) => item.id === id); return !spot || !isKnownClosed(spot, date); }));
   }
 
   function toggleDetour(id: string) {
@@ -153,15 +177,21 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
 
   const ordered = selectedIds.map((id) => spots.find((spot) => spot.id === id)).filter((spot): spot is ResearchSpot => Boolean(spot));
   const selectedDetours = detours.filter((spot) => selectedDetourIds.includes(spot.id));
-  const points: RoutePoint[] = insertDetours(ordered.map((spot) => spot.id), selectedDetours).flatMap((id): RoutePoint[] => {
+  // 聖地を軸にし、寄り道は聖地と聖地の区間の中で遠回りが最も少ない位置に入れる。
+  const coordinates = new Map<string, { latitude: number; longitude: number }>([...anchors.map((anchor) => [anchor.id, anchor] as const), ...detours.map((spot) => [spot.id, spot] as const)]);
+  const seichiIds = ordered.map((spot) => spot.id);
+  const axis = bestAxisOrder(seichiIds, selectedDetours.map((spot) => spot.id), (from, to) => {
+    const a = coordinates.get(from), b = coordinates.get(to);
+    // 位置が分からない地点があっても、聖地を軸にした並び（寄り道は区間内）は保つ。
+    return a && b ? metersBetween(a, b) : 0;
+  });
+  const points: RoutePoint[] = (axis?.order ?? seichiIds).flatMap((id): RoutePoint[] => {
     const spot = ordered.find((item) => item.id === id);
     if (spot) return [{ id, name: spot.name, query: placeQuery(spot), placeId: anchors.find((anchor) => anchor.id === id)?.placeId ?? null, detour: null }];
     const detour = detours.find((item) => item.id === id);
     return detour ? [{ id, name: detour.name, query: detour.name, placeId: detour.place_id, detour }] : [];
   });
-  const firstFood = detours.find((spot) => spot.category === "food" && !isKnownClosed(spot, visitDate));
-  const firstCulture = detours.find((spot) => spot.category !== "food" && !isKnownClosed(spot, visitDate));
-  const recommended = [firstFood, firstCulture].filter((spot): spot is VerifiedDetour => Boolean(spot)).map((spot) => spot.id);
+  const recommended = pickRecommendedDetours(detours, visitDate, MAX_DETOURS);
   const single = spots.length === 1 ? spots[0] : null;
 
   return <section className="screen-section research-course-screen">
@@ -203,6 +233,8 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
 
       <section className="research-course-result" aria-labelledby="plan-heading" aria-live="polite">
         <h2 id="plan-heading">② 訪問順の案</h2>
+        {selectedDetourIds.length ? <p className="detour-included">聖地の区間の途中に、地元の味や文化にふれられる<b>寄り道</b>を入れています。不要なら「✕」で外せます。</p> : null}
+        {detourState.status === "loading" ? <p className="loading-note" role="status">寄り道を探しています…</p> : null}
         {ordered.length ? <>
           <ol>{points.map((point, index) => {
             const seichiIndex = ordered.findIndex((spot) => spot.id === point.id);
@@ -210,7 +242,7 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
               <div className="plan-stop">
                 <span className="stop-number" aria-hidden="true">{index + 1}</span>
                 <span className="plan-stop-name"><strong>{point.name}</strong>{point.detour ? <small>{DETOUR_CATEGORY_LABELS[point.detour.category]}の寄り道</small> : null}</span>
-                {point.detour ? <div className="order-buttons"><button type="button" onClick={() => toggleDetour(point.id)} aria-label={`${point.name}をコースから外す`}>✕</button></div>
+                {point.detour ? <div className="order-buttons"><button type="button" className="stop-remove" onClick={() => toggleDetour(point.id)} aria-label={`${point.name}をコースから外す`}>✕ 外す</button></div>
                   : ordered.length > 1 ? <div className="order-buttons">
                     <button type="button" onClick={() => moveSpot(point.id, -1)} disabled={seichiIndex === 0} aria-label={`${point.name}を一つ前へ`}>↑</button>
                     <button type="button" onClick={() => moveSpot(point.id, 1)} disabled={seichiIndex === ordered.length - 1} aria-label={`${point.name}を一つ後へ`}>↓</button>
@@ -223,16 +255,14 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
           <p className="field-hint">移動時間と営業状況は、Googleマップで訪問日時を指定して確認してください。</p>
 
           <div className="research-detours" aria-busy={detourState.status === "loading"}>
-            <h3>③ 地域の食と文化に寄り道する</h3>
-            {detourState.status !== "ready" ? <div className="detour-search">
-              <label>訪問日<input type="date" min={todayInJapan()} value={visitDate} onChange={(event) => setVisitDate(event.target.value)} /></label>
-              <button className="secondary-button" type="button" disabled={detourState.status === "loading" || !visitDate} onClick={() => void searchDetours()}>{detourState.status === "loading" ? "探しています…" : "寄り道を探す"}</button>
-            </div> : null}
-            {detourState.status === "idle" ? <p className="field-hint">選んだ地点の間や前後で寄れる、地元の味や文化にふれられるお店・施設を探します。</p> : null}
-            {detourState.status === "error" ? <p className="inline-error" role="alert">{detourState.message}</p> : null}
+            <h3>③ 寄り道を入れ替える</h3>
+            <p className="field-hint">聖地の区間の途中で寄れる、地元の味や文化にふれられる場所です。チェックを付け外しすると訪問順の案に反映されます（最大{MAX_DETOURS}件）。</p>
+            <label className="detour-date">訪問日<input type="date" min={todayInJapan()} value={visitDate} onChange={(event) => changeVisitDate(event.target.value)} /><small>定休日の確認に使います</small></label>
+            {detourState.status === "loading" ? <p className="loading-note" role="status">地域の寄り道を探しています…</p> : null}
+            {detourState.status === "error" ? <div className="inline-error" role="alert"><p>{detourState.message}</p><button className="text-button" type="button" onClick={() => void searchDetours([...selectedIds], selectionKey)}>もう一度探す</button></div> : null}
             {detourState.status === "ready" && detourState.unlocated?.length ? <p className="field-hint">{detourState.unlocated.map((id) => ordered.find((spot) => spot.id === id)?.name).filter(Boolean).join("、")}は位置を特定できなかったため、寄り道探しに使っていません。</p> : null}
             {detourState.status === "ready" && !detours.length ? <p className="field-hint" role="status">条件に合う寄り道は見つかりませんでした。</p> : null}
-            {detourState.status === "ready" && recommended.length && !selectedDetourIds.length ? <button className="secondary-button" type="button" onClick={() => setSelectedDetourIds(recommended.slice(0, MAX_DETOURS))}>おすすめ{Math.min(recommended.length, MAX_DETOURS)}件をまとめて入れる</button> : null}
+            {detourState.status === "ready" && recommended.length && !selectedDetourIds.length ? <button className="secondary-button" type="button" onClick={() => setSelectedDetourIds(recommended)}>おすすめの寄り道を入れる</button> : null}
             {detours.length ? <ul className="detour-list">{detours.map((spot) => {
               const checked = selectedDetourIds.includes(spot.id);
               const closed = isKnownClosed(spot, visitDate);

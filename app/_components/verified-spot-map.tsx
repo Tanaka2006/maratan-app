@@ -5,7 +5,7 @@ import type { MatchedWork, VerifiedDetour, VerifiedLeg, VerifiedSpot } from "../
 import { DETOUR_CATEGORY_LABELS } from "../_data/local-detours";
 import { isKnownClosed, type VerifiedCourse } from "../_data/real-planner";
 import { displayVersion } from "../_data/work-genres";
-import DetourCard, { DetourBadge, DetourNote } from "./detour-card";
+import DetourCard, { DetourBadge, DetourNote, pickRecommendedDetours } from "./detour-card";
 import GoogleSpotMap from "./google-spot-map";
 
 type ApiLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null };
@@ -92,6 +92,8 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
   const [createError, setCreateError] = useState("");
   const requestVersion = useRef(0);
   const detourKey = useRef("");
+  // おすすめの寄り道を自動で入れた聖地の組み合わせ。外した寄り道を勝手に戻さないために使う。
+  const autoDetourKey = useRef("");
   const resultRef = useRef<HTMLElement | null>(null);
   const version = displayVersion(work.version);
 
@@ -115,7 +117,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
   }, [result]);
 
   // 地域の寄り道は、選んだ聖地の組み合わせごとに Gemini と Google マップから探す。
-  async function searchDetours(spotIds: string[]) {
+  async function searchDetours(spotIds: string[]): Promise<{ detours: VerifiedDetour[]; routable: boolean } | null> {
     const key = spotIds.join(",");
     detourKey.current = key;
     setDetourState({ status: "loading" });
@@ -123,18 +125,23 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
       const response = await fetch("/api/detours", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workId: work.id, region, spotIds, visitDate }) });
       const data = await response.json();
-      if (detourKey.current !== key) return;
+      if (detourKey.current !== key) return null;
       if (!response.ok) throw new Error(data.error || "寄り道候補を取得できませんでした。");
-      setDetours(Array.isArray(data.detours) ? data.detours : []);
-      setDetourState({ status: "ready", source: data.source, routable: data.routable !== false });
+      const found: VerifiedDetour[] = Array.isArray(data.detours) ? data.detours : [];
+      const routable = data.routable !== false;
+      setDetours(found);
+      setDetourState({ status: "ready", source: data.source, routable });
+      return { detours: found, routable };
     } catch (error) {
-      if (detourKey.current !== key) return;
+      if (detourKey.current !== key) return null;
       detourKey.current = "";
       setDetourState({ status: "error", message: error instanceof Error ? error.message : "寄り道候補を取得できませんでした。" });
+      return null;
     }
   }
 
   function resetDetours() {
+    autoDetourKey.current = "";
     detourKey.current = "";
     setDetours([]);
     setSelectedDetourIds([]);
@@ -148,22 +155,48 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
     setCreateError("");
   }
 
-  async function createCourse(detourIds = selectedDetourIds) {
+  async function requestItinerary(detourIds: string[]) {
+    const courseIds = [...selectedIds, ...detourIds];
+    const stays = Object.fromEntries(Object.entries(stayMinutes).filter(([id]) => courseIds.includes(id)));
+    const response = await fetch("/api/itinerary", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workId: work.id, region, spotIds: selectedIds, detourIds, visitDate, availableMinutes, stayMinutes: stays }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "コースを作成できませんでした。");
+    return data as ItineraryResult;
+  }
+
+  // detourIds を渡さないときは「コースを作る」ボタンから。初回はおすすめの寄り道を最初からコースに入れる。
+  async function createCourse(detourIds?: string[]) {
     if (problems.length) return;
     const current = ++requestVersion.current;
     setCreating(true);
     setCreateError("");
+    const key = selectedIds.join(",");
+    let ids = detourIds ?? selectedDetourIds;
+    let autoAdded = false;
     try {
-      const courseIds = [...selectedIds, ...detourIds];
-      const stays = Object.fromEntries(Object.entries(stayMinutes).filter(([id]) => courseIds.includes(id)));
-      const response = await fetch("/api/itinerary", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workId: work.id, region, spotIds: selectedIds, detourIds, visitDate, availableMinutes, stayMinutes: stays }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "コースを作成できませんでした。");
-      if (current === requestVersion.current) {
-        setResult(data as ItineraryResult);
-        if (detourKey.current !== selectedIds.join(",")) void searchDetours(selectedIds);
+      if (detourIds === undefined && autoDetourKey.current !== key) {
+        const found = detourKey.current === key && detourState.status === "ready"
+          ? { detours, routable: detourState.routable !== false } : await searchDetours(selectedIds);
+        if (current !== requestVersion.current) return;
+        autoDetourKey.current = key;
+        if (found?.routable) {
+          ids = pickRecommendedDetours(found.detours, visitDate, Math.min(MAX_DETOURS, 5 - selectedIds.length));
+          autoAdded = ids.length > 0;
+          setSelectedDetourIds(ids);
+        }
       }
+      let data: ItineraryResult;
+      try {
+        data = await requestItinerary(ids);
+      } catch (error) {
+        // 自動で入れた寄り道のせいで計算できないときは、寄り道なしのコースを出す。
+        if (!autoAdded) throw error;
+        ids = [];
+        setSelectedDetourIds([]);
+        data = await requestItinerary([]);
+      }
+      if (current === requestVersion.current) setResult(data);
     } catch (error) {
       if (current === requestVersion.current) {
         setResult(null);
@@ -193,10 +226,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
   const detourById = new Map(detours.map((spot) => [spot.id, spot]));
   const openDetours = detours.filter((spot) => !(visitDate && isKnownClosed(spot, visitDate)));
   const detourLimit = Math.min(MAX_DETOURS, 5 - selectedIds.length);
-  // 食と文化の両方に触れられるよう、1件ずつ先に選ぶ。
-  const recommendedDetourIds = [openDetours.find((spot) => spot.category === "food"), openDetours.find((spot) => spot.category !== "food"), ...openDetours]
-    .filter((spot): spot is VerifiedDetour => Boolean(spot)).map((spot) => spot.id)
-    .filter((id, index, list) => list.indexOf(id) === index).slice(0, Math.max(0, detourLimit));
+  const recommendedDetourIds = pickRecommendedDetours(detours, visitDate, detourLimit);
   const canAddDetours = detourState.status === "ready" && detourState.routable !== false;
 
   const margin = result ? availableMinutes - result.course.totalMinutes : 0;
@@ -254,7 +284,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           <label>現地で使える時間<select value={availableMinutes} onChange={(event) => { setAvailableMinutes(Number(event.target.value)); invalidateResult(); }}>{DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{formatMinutes(minutes)}</option>)}</select><span className="field-hint">1か所目に着いてから、最後の場所を出るまで</span></label>
         </div>
         {selectedSpots.length ? <details className="detail-disclosure stay-disclosure"><summary>滞在時間を変える</summary><div className="verified-course-fields">{[...selectedSpots, ...selectedDetours].map((spot) => <label key={spot.id}>{spot.name}<span className="input-with-unit"><input type="number" inputMode="numeric" min="5" max="180" step="5" value={Number.isFinite(stayOf(spot)) ? stayOf(spot) : ""} onChange={(event) => { setStayMinutes((current) => ({ ...current, [spot.id]: event.target.value === "" ? Number.NaN : Number(event.target.value) })); invalidateResult(); }} />分</span></label>)}</div></details> : null}
-        <button className="primary-button" type="button" disabled={!canCreate} aria-describedby={problems.length ? "plan-problems" : undefined} onClick={() => void createCourse()}>{creating ? "経路を調べています…" : "コースを作る"}</button>
+        <button className="primary-button" type="button" disabled={!canCreate} aria-describedby={problems.length ? "plan-problems" : undefined} onClick={() => void createCourse()}>{creating ? detourState.status === "loading" ? "地域の寄り道を探しています…" : "経路を調べています…" : "コースを作る"}</button>
         {problems.length ? <ul id="plan-problems" className="form-problems">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : null}
         {createError ? <p className="inline-error" role="alert">{createError}</p> : null}
       </section>
@@ -266,6 +296,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           <strong>{statusView.label}</strong>
           <p>{statusView.detail}</p>
         </div>
+        {hasDetourInCourse ? <p className="detour-included">聖地の区間の途中で、地元の味や文化にふれられる<b>寄り道</b>を入れています。不要なら「✕ 外す」で外せます。</p> : null}
 
         <ol className="course-stops">{result.course.stops.map((spot, index) => {
           const leg = result.course.legs[index];
@@ -280,7 +311,8 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
             <div className="course-stop-body">
               <strong>{spot.name}</strong>
               <span className="stop-meta">{detour ? <DetourBadge spot={detour} /> : null}滞在 約{result.stayMinutes[spot.id] ?? spot.stay_minutes}分
-                {spot.kind === "detour" ? <a href={spot.maps_uri ?? mapsUrl(spot)} target="_blank" rel="noreferrer">地図 ↗</a> : null}</span>
+                {spot.kind === "detour" ? <a href={spot.maps_uri ?? mapsUrl(spot)} target="_blank" rel="noreferrer">地図 ↗</a> : null}
+                {spot.kind === "detour" ? <button type="button" className="stop-remove" disabled={creating} onClick={() => toggleDetour(spot.id)} aria-label={`${spot.name}をコースから外す`}>✕ 外す</button> : null}</span>
               {detour?.local_feature ? <p className="detour-feature">{detour.local_feature}</p> : null}
               {spot.kind !== "detour" && spot.access_note ? <details className="detail-disclosure stop-disclosure"><summary>注意</summary><p>{spot.access_note}</p></details> : null}
               {leg && next ? <div className={`verified-leg${longWalk ? " is-long" : ""}`}>
@@ -318,13 +350,13 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
       </section> : null}
 
       {result ? <section className="verified-detours" aria-labelledby="detour-heading" aria-busy={detourState.status === "loading"}>
-        <h2 id="detour-heading">④ 地域の食と文化に寄り道する</h2>
-        <p>聖地の間や前後で寄れる、地元の味や文化にふれられる場所です。選ぶとコースを作り直します（最大{MAX_DETOURS}件）。</p>
+        <h2 id="detour-heading">④ 寄り道を入れ替える</h2>
+        <p>聖地の区間の途中で寄れる、地元の味や文化にふれられる場所です。チェックを付け外しするとコースを作り直します（最大{MAX_DETOURS}件）。</p>
         {detourState.status === "loading" ? <p className="loading-note" role="status">寄り道を探しています…</p> : null}
         {detourState.status === "error" ? <div className="inline-error" role="alert"><p>{detourState.message}</p><button className="text-button" type="button" onClick={() => void searchDetours(selectedIds)}>もう一度探す</button></div> : null}
         {detourState.status === "ready" && !detours.length ? <p className="field-hint" role="status">条件に合う寄り道は見つかりませんでした。</p> : null}
         {detourState.status === "ready" && detourState.routable === false ? <p className="field-hint">移動時間を計算できないため、今はコースに追加できません。候補とGoogleマップは確認できます。</p> : null}
-        {canAddDetours && recommendedDetourIds.length && !selectedDetourIds.length ? <button className="secondary-button" type="button" disabled={creating} onClick={() => applyDetours(recommendedDetourIds)}>おすすめ{recommendedDetourIds.length}件をまとめて入れる</button> : null}
+        {canAddDetours && recommendedDetourIds.length && !selectedDetourIds.length ? <button className="secondary-button" type="button" disabled={creating} onClick={() => applyDetours(recommendedDetourIds)}>おすすめの寄り道を入れる</button> : null}
         {detours.length ? <ul className="detour-list">{detours.map((spot) => {
           const closed = Boolean(visitDate && isKnownClosed(spot, visitDate));
           const checked = selectedDetourIds.includes(spot.id);

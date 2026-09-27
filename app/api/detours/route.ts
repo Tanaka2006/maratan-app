@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 type Input = { workId: string; region: string; spotIds?: string[]; researchSpotIds?: string[]; visitDate: string };
 
 const requestTimes = new Map<string, number[]>();
-const LIMIT_PER_MINUTE = 3;
+const LIMIT_PER_MINUTE = 6;
 
 function rateLimited(ip: string) {
   const now = Date.now();

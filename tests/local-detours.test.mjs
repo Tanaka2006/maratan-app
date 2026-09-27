@@ -47,11 +47,11 @@ test("聖地から離れすぎた場所は寄り道にしない", () => {
   assert.equal(isWithinReach({ latitude: 36.1461, longitude: 137.2522 }, [library, station]), false, "高山駅付近は約11km離れている");
 });
 
-test("聖地の間にある場所は「間」、外れた場所は最寄り聖地の「前後」と提案する", () => {
+test("聖地が2件以上なら寄り道は必ず区間（間）に、1件なら「前後」と提案する", () => {
   const between = suggestSlot({ latitude: 36.2377, longitude: 137.1881 }, [library, station, shrine]);
   assert.deepEqual(between, { kind: "between", fromId: "p_library", toId: "p_station" });
   const outside = suggestSlot({ latitude: 36.2330, longitude: 137.1990 }, [library, shrine]);
-  assert.equal(outside.kind, "near");
+  assert.equal(outside.kind, "between");
   const names = { p_library: "飛騨市図書館", p_station: "飛騨古川駅" };
   assert.match(slotLabel(between, names), /「飛騨市図書館」と「飛騨古川駅」の間/);
   assert.equal(suggestSlot({ latitude: 36.2, longitude: 137.1 }, [library]).kind, "near");
@@ -113,4 +113,24 @@ test("位置検索で別の地域に外れた地点は基準から除く", async
   assert.deepEqual(consistentAnchors([...hida, far]).map((a) => a.id), ["x", "y"]);
   assert.deepEqual(consistentAnchors([hida[0]]).map((a) => a.id), ["x"]);
   assert.deepEqual(consistentAnchors([hida[0], far]).map((a) => a.id), ["x"]);
+});
+
+test("訪問順は聖地を軸にし、寄り道は聖地と聖地の区間の中にだけ入れる", async () => {
+  const { axisOrders, bestAxisOrder } = await import("../app/_data/local-detours.ts");
+  // 聖地 A→B→C の順番は変えず、先頭と末尾は必ず聖地
+  const orders = axisOrders(["A", "B", "C"], ["x"]);
+  assert.deepEqual(orders.map((order) => order.join("")).sort(), ["ABxC", "AxBC"]);
+  for (const order of axisOrders(["A", "B", "C"], ["x", "y"])) {
+    assert.equal(order[0], "A");
+    assert.equal(order[order.length - 1], "C");
+    assert.deepEqual(order.filter((id) => "ABC".includes(id)), ["A", "B", "C"]);
+  }
+  // 聖地が1件なら前後どちらにも入れられる
+  assert.deepEqual(axisOrders(["A"], ["x"]).map((order) => order.join("")).sort(), ["Ax", "xA"]);
+  // 区間ごとの移動時間が最小になる区間に入る（x は B と C の間にある）
+  const minutes = { AB: 10, BC: 10, AC: 15, Ax: 20, xB: 20, Bx: 3, xC: 3, xA: 20, CB: 10, BA: 10 };
+  const best = bestAxisOrder(["A", "B", "C"], ["x"], (from, to) => minutes[from + to] ?? null);
+  assert.deepEqual(best, { order: ["A", "B", "x", "C"], cost: 16 });
+  // 移動時間が分からない区間しかなければ null
+  assert.equal(bestAxisOrder(["A", "B"], ["x"], () => null), null);
 });

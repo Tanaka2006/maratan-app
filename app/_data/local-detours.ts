@@ -118,13 +118,12 @@ export function isWithinReach(place: Point, seichi: readonly Point[]) {
 }
 
 /**
- * 寄り道をどこで挟むと遠回りが少ないかを直線距離で判定する。
- * 2つの聖地の間に入れても遠回りが小さいときは「間」、そうでなければ最寄り聖地の「前後」とする。
+ * 寄り道をどの聖地の区間に挟むと遠回りが少ないかを直線距離で判定する。
+ * 聖地が2件以上なら必ず「間」（区間内）とし、聖地が1件のときだけ「前後」とする。
  */
 export function suggestSlot(place: Point, seichi: readonly Pick<VerifiedSpot, "id" | "latitude" | "longitude">[]): DetourSlot | null {
   if (!seichi.length) return null;
   const nearest = [...seichi].sort((a, b) => metersBetween(place, a) - metersBetween(place, b))[0];
-  const endpointCost = metersBetween(place, nearest);
   let best: { cost: number; fromId: string; toId: string } | null = null;
   for (let i = 0; i < seichi.length; i++) {
     for (let j = i + 1; j < seichi.length; j++) {
@@ -133,8 +132,57 @@ export function suggestSlot(place: Point, seichi: readonly Pick<VerifiedSpot, "i
       if (!best || cost < best.cost) best = { cost, fromId: a.id, toId: b.id };
     }
   }
-  if (best && best.cost <= endpointCost * 1.2) return { kind: "between", fromId: best.fromId, toId: best.toId };
+  if (best) return { kind: "between", fromId: best.fromId, toId: best.toId };
   return { kind: "near", spotId: nearest.id };
+}
+
+/** 聖地の区間に寄り道を挟んだときに増える直線距離（小さいほど区間の途中にある）。 */
+export function intervalDetourCost(place: Point, seichi: readonly Point[]) {
+  if (seichi.length < 2) return seichi.length ? metersBetween(place, seichi[0]) : 0;
+  let best = Infinity;
+  for (let i = 0; i < seichi.length; i++) {
+    for (let j = i + 1; j < seichi.length; j++) {
+      best = Math.min(best, metersBetween(seichi[i], place) + metersBetween(place, seichi[j]) - metersBetween(seichi[i], seichi[j]));
+    }
+  }
+  return best;
+}
+
+function permute<T>(items: readonly T[]): T[][] {
+  if (items.length < 2) return [[...items]];
+  return items.flatMap((item, index) => permute(items.filter((_, other) => other !== index)).map((tail) => [item, ...tail]));
+}
+
+/**
+ * 聖地を軸にした訪問順の候補。聖地の順番は変えず、寄り道は聖地と聖地の区間の中にだけ入れる。
+ * 聖地が1件のときは、その前後に入れる。
+ */
+export function axisOrders(seichiOrder: readonly string[], detourIds: readonly string[]): string[][] {
+  const all = [...seichiOrder, ...detourIds.filter((id) => !seichiOrder.includes(id))];
+  const seichi = new Set(seichiOrder);
+  return permute(all).filter((order) => {
+    if (order.filter((id) => seichi.has(id)).join("\u0000") !== seichiOrder.join("\u0000")) return false;
+    return seichiOrder.length < 2 || (order[0] === seichiOrder[0] && order[order.length - 1] === seichiOrder[seichiOrder.length - 1]);
+  });
+}
+
+/**
+ * 区間ごとの移動コスト（分や距離）が最も小さくなる、聖地を軸にした訪問順を返す。
+ * コストが分からない区間を含む候補は使わない。どれも計算できなければ null。
+ */
+export function bestAxisOrder(seichiOrder: readonly string[], detourIds: readonly string[], cost: (from: string, to: string) => number | null): { order: string[]; cost: number } | null {
+  let best: { order: string[]; cost: number } | null = null;
+  for (const order of axisOrders(seichiOrder, detourIds)) {
+    let total = 0;
+    let complete = true;
+    for (let i = 0; i < order.length - 1; i++) {
+      const leg = cost(order[i], order[i + 1]);
+      if (leg === null || !Number.isFinite(leg)) { complete = false; break; }
+      total += leg;
+    }
+    if (complete && (!best || total < best.cost)) best = { order, cost: total };
+  }
+  return best;
 }
 
 export function slotLabel(slot: DetourSlot | null, names: Record<string, string>) {

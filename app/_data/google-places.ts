@@ -3,7 +3,7 @@ import type { VerifiedDetour } from "./anilist-types";
 /** 寄り道探しの基準にする聖地。DBの確認済み聖地、または調査リストの地点を位置検索したもの。 */
 export type DetourAnchor = { id: string; name: string; latitude: number; longitude: number };
 import {
-  categoryFromTypes, closedWeekdaysFromPeriods, DEFAULT_DETOUR_STAY, extractJson, isWithinReach, matchGroundedPicks,
+  categoryFromTypes, closedWeekdaysFromPeriods, intervalDetourCost, DEFAULT_DETOUR_STAY, extractJson, isWithinReach, matchGroundedPicks,
   metersBetween, normalizeName, normalizePlaceId, openingHoursTextFor, safeDetourText, safeMapsUri, slotLabel, suggestSlot,
   type GroundedPlace, type PlacePeriod,
 } from "./local-detours";
@@ -263,7 +263,8 @@ export async function searchLocalDetours(spots: DetourAnchor[], region: string, 
       }));
     }
   }
-  const detours = [...accepted.values()].slice(0, MAX_DETOUR_RESULTS);
+  // 聖地と聖地の区間の途中にある（遠回りが少ない）順に並べる。先頭の候補が最初からコースに入る。
+  const detours = [...accepted.values()].sort((a, b) => intervalDetourCost(a, spots) - intervalDetourCost(b, spots)).slice(0, MAX_DETOUR_RESULTS);
   const source = sources.size === 2 ? "mixed" : sources.has("gemini-maps") ? "gemini-maps" : sources.has("places-search") ? "places-search" : "none";
   return { detours, source };
 }

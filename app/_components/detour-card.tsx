@@ -2,10 +2,17 @@
 
 import type { VerifiedDetour } from "../_data/anilist-types";
 import { DETOUR_CATEGORY_LABELS, openingHoursTextFor } from "../_data/local-detours";
+import { isKnownClosed } from "../_data/real-planner";
 
-/** 「〇〇と△△の間で寄りやすい場所です」を「〇〇と△△の間」に縮める。 */
-export function shortSlot(label: string | null | undefined) {
-  return label ? label.replace(/[でに]寄りやすい場所です$/, "") : null;
+/**
+ * 最初からコースに入れる寄り道。候補は聖地の区間の途中にある順に並んでいるので、
+ * 食と文化の両方にふれられるよう、休業日でないものから1件ずつ選ぶ。
+ */
+export function pickRecommendedDetours(detours: readonly VerifiedDetour[], visitDate: string, limit: number) {
+  const open = detours.filter((spot) => !isKnownClosed(spot, visitDate));
+  return [open.find((spot) => spot.category === "food"), open.find((spot) => spot.category !== "food"), ...open]
+    .filter((spot): spot is VerifiedDetour => Boolean(spot)).map((spot) => spot.id)
+    .filter((id, index, list) => list.indexOf(id) === index).slice(0, Math.max(0, limit));
 }
 
 export function detourMapsUrl(spot: VerifiedDetour) {
@@ -26,14 +33,13 @@ export default function DetourCard({ spot, checked, disabled, closed, visitDate,
   onToggle: () => void;
 }) {
   const hours = openingHoursTextFor(spot.weekday_hours, visitDate);
-  const slot = shortSlot(spot.slot_label);
   return <li className={`detour-card${checked ? " is-selected" : ""}${closed ? " is-closed" : ""}`}>
     <label className="detour-card-main">
       <input type="checkbox" checked={checked} disabled={disabled} onChange={onToggle} />
       <span className="detour-card-text">
         <span className="detour-card-title"><DetourBadge spot={spot} /><strong>{spot.name}</strong></span>
         {spot.local_feature ? <span className="detour-feature">{spot.local_feature}</span> : null}
-        <small>{slot ? `${slot}・` : ""}滞在 約{spot.stay_minutes}分</small>
+        <small>滞在 約{spot.stay_minutes}分</small>
         {closed ? <small className="detour-closed">選んだ日は定休日の可能性があります</small> : null}
       </span>
     </label>

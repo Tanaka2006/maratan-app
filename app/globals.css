@@ -372,3 +372,13 @@ footer small { color: #cfc6c0; font-size: 12px; }
   .verified-map-frame iframe, .google-spot-map { height: 240px; }
   .status-total b { font-size: 26px !important; }
 }
+.stop-remove { background: #fff; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; margin-left: auto; min-height: 32px; padding: 2px 12px; }
+.stop-remove:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.detour-included { background: var(--green-soft); border-radius: 10px; color: var(--green); font-size: 13px; line-height: 1.7; margin: 12px 0 0; padding: 8px 12px; }
+.detour-included b { font-weight: 800; }
+.detour-date { align-items: center; color: var(--ink); display: flex; flex-wrap: wrap; font-size: 13px; font-weight: 700; gap: 4px 10px; margin: 8px 0 10px; }
+.detour-date input { background: #fff; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); font-size: 16px; height: 40px; padding: 0 10px; }
+.detour-date small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.research-detours > .field-hint:first-of-type { margin-top: 0; }
+.research-course-result .detour-included { margin: 0 0 12px; }
+.order-buttons .stop-remove { height: auto; width: auto; }
