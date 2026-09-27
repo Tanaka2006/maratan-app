@@ -382,3 +382,10 @@ footer small { color: #cfc6c0; font-size: 12px; }
 .research-detours > .field-hint:first-of-type { margin-top: 0; }
 .research-course-result .detour-included { margin: 0 0 12px; }
 .order-buttons .stop-remove { height: auto; width: auto; }
+.leg-alt { color: var(--muted); font-size: 12px; }
+.plan-leg-box { background: #fff; border: 1px dashed var(--line-strong); border-radius: 10px; display: grid; font-size: 13px; gap: 2px; margin: 4px 0 4px 38px; padding: 6px 10px; }
+.plan-leg-box .leg-line a { color: var(--orange-deep); font-weight: 700; }
+.leg-mode.is-bus b::before { content: "🚌 "; }
+.leg-mode.is-train b::before { content: "🚃 "; }
+.leg-mode.is-mixed b::before { content: "🚃🚌 "; }
+.leg-mode.is-walk b::before { content: "🚶 "; }

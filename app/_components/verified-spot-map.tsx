@@ -7,8 +7,11 @@ import { isKnownClosed, type VerifiedCourse } from "../_data/real-planner";
 import { displayVersion } from "../_data/work-genres";
 import DetourCard, { DetourBadge, DetourNote, pickRecommendedDetours } from "./detour-card";
 import GoogleSpotMap from "./google-spot-map";
+import LegSummary from "./leg-summary";
+import type { LegOption, TransitKind } from "../_data/transit-label";
 
-type ApiLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null };
+type ApiLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null;
+  transitKind: TransitKind | null; alternative: LegOption | null };
 type ApiCourse = Omit<VerifiedCourse, "legs"> & { legs: ApiLeg[] };
 type ItineraryResult = { course: ApiCourse; recommendation: { id: string; reason: string; source: "gemini" | "rule" }; source: "google-routes" | "registered" | "mixed"; status: "fits" | "over" | "needs-check"; stayMinutes: Record<string, number>; costs: { transitYen: number | null; admissionYen: number | null; foodExperienceYen: number | null }; notices: string[] };
 
@@ -62,10 +65,6 @@ function formatMinutes(total: number) {
   const minutes = total % 60;
   if (!hours) return `${minutes}分`;
   return minutes ? `${hours}時間${minutes}分` : `${hours}時間`;
-}
-
-function formatDistance(meters: number) {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(1)}km` : `${Math.round(meters / 10) * 10}m`;
 }
 
 function formatYen(value: number | null) {
@@ -316,10 +315,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
               {detour?.local_feature ? <p className="detour-feature">{detour.local_feature}</p> : null}
               {spot.kind !== "detour" && spot.access_note ? <details className="detail-disclosure stop-disclosure"><summary>注意</summary><p>{spot.access_note}</p></details> : null}
               {leg && next ? <div className={`verified-leg${longWalk ? " is-long" : ""}`}>
-                <div className="leg-line">
-                  <span><b>{leg.mode === "walking" ? "徒歩" : "電車・バス"} 約{formatMinutes(leg.minutes)}</b>{leg.mode === "walking" && leg.walkingMeters ? `・${formatDistance(leg.walkingMeters)}` : ""}{leg.fareYen ? `・約${leg.fareYen.toLocaleString()}円` : ""}</span>
-                  <a href={directionsUrl(spot, next, leg.mode)} target="_blank" rel="noreferrer">経路 ↗</a>
-                </div>
+                <LegSummary leg={leg} href={directionsUrl(spot, next, leg.mode)} />
                 {longWalk ? <span className="leg-warning">歩く距離が長めです。バスやタクシーも検討してください。</span> : null}
                 {leg.source === "registered" ? <a className="leg-source" href={leg.source_url} target="_blank" rel="noreferrer">移動時間の出典 ↗</a> : null}
                 {nearbyDetours.length ? <div className="leg-detours"><span>途中で寄れる</span>{nearbyDetours.map((item) =>

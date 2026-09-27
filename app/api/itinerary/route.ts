@@ -1,11 +1,14 @@
 import type { VerifiedLeg, VerifiedSpot } from "../../_data/anilist-types";
 import { isKnownClosed, type VerifiedCourse } from "../../_data/real-planner";
 import { detourFromPlace, fetchPlaceDetails, placesApiKey } from "../../_data/google-places";
+import { computeLeg } from "../../_data/google-routes";
 import { bestAxisOrder, isPlaceId, isWithinReach } from "../../_data/local-detours";
+import type { LegOption, TransitKind } from "../../_data/transit-label";
 
 export const runtime = "nodejs";
 
-type RouteLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null };
+type RouteLeg = VerifiedLeg & { source: "google-routes" | "registered"; walkingMeters: number | null; fareYen: number | null;
+  transitKind: TransitKind | null; alternative: LegOption | null };
 type Course = Omit<VerifiedCourse, "legs"> & { legs: RouteLeg[]; id: string };
 type Input = { workId: string; region: string; spotIds: string[]; detourIds?: string[]; visitDate: string; availableMinutes: number; stayMinutes?: Record<string, number> };
 
@@ -54,54 +57,6 @@ function validate(value: unknown): Input | null {
 function permutations<T>(items: T[]): T[][] {
   if (items.length < 2) return [items];
   return items.flatMap((item, index) => permutations(items.filter((_, other) => other !== index)).map((tail) => [item, ...tail]));
-}
-
-function minutes(duration: unknown) {
-  if (typeof duration !== "string" || !/^\d+(?:\.\d+)?s$/.test(duration)) return null;
-  const value = Math.ceil(Number(duration.slice(0, -1)) / 60);
-  return Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
-function representativeDeparture(date: string) {
-  const noonJst = new Date(`${date}T03:00:00Z`).getTime();
-  return new Date(Math.max(noonJst, Date.now() + 10 * 60_000)).toISOString();
-}
-
-async function googleLeg(from: VerifiedSpot, to: VerifiedSpot, mode: "walking" | "transit", date: string, key: string): Promise<RouteLeg | null> {
-  const body = {
-    origin: { location: { latLng: { latitude: from.latitude, longitude: from.longitude } } },
-    destination: { location: { latLng: { latitude: to.latitude, longitude: to.longitude } } },
-    travelMode: mode === "walking" ? "WALK" : "TRANSIT",
-    ...(mode === "transit" ? { departureTime: representativeDeparture(date), transitPreferences: { allowedTravelModes: ["BUS", "SUBWAY", "TRAIN", "LIGHT_RAIL", "RAIL"] } } : {}),
-    languageCode: "ja-JP",
-  };
-  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key,
-      "X-Goog-FieldMask": "routes.duration,routes.legs.steps.travelMode,routes.legs.steps.distanceMeters,routes.legs.steps.transitDetails.transitLine.vehicle.type,routes.travel_advisory.transitFare" },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(8000), cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const data: unknown = await response.json();
-  const routes = (data as { routes?: Array<{ duration?: unknown; travelAdvisory?: { transitFare?: { units?: string; nanos?: number; currencyCode?: string } }; legs?: Array<{ steps?: Array<{ travelMode?: string; distanceMeters?: number; transitDetails?: { transitLine?: { vehicle?: { type?: string } } } }> }> }> }).routes;
-  if (!Array.isArray(routes)) return null;
-  const allowedVehicles = new Set(["BUS", "INTERCITY_BUS", "TROLLEYBUS", "SUBWAY", "TRAIN", "RAIL", "HEAVY_RAIL", "COMMUTER_TRAIN", "HIGH_SPEED_TRAIN", "LIGHT_RAIL", "TRAM"]);
-  for (const route of routes) {
-    const duration = minutes(route.duration);
-    const steps = route.legs?.flatMap((leg) => leg.steps ?? []) ?? [];
-    if (duration === null || !steps.length || steps.some((step) => step.travelMode !== "WALK" && step.travelMode !== "TRANSIT")) continue;
-    if (steps.some((step) => step.travelMode === "TRANSIT" && !allowedVehicles.has(step.transitDetails?.transitLine?.vehicle?.type ?? ""))) continue;
-    if (mode === "transit" && !steps.some((step) => step.travelMode === "TRANSIT")) continue;
-    const walkingSteps = steps.filter((step) => step.travelMode === "WALK");
-    const walkingMeters = walkingSteps.every((step) => Number.isFinite(step.distanceMeters))
-      ? walkingSteps.reduce((sum, step) => sum + (step.distanceMeters ?? 0), 0) : null;
-    const fare = route.travelAdvisory?.transitFare;
-    const fareYen = mode === "walking" ? 0 : fare?.currencyCode === "JPY" && Number.isFinite(Number(fare.units))
-      ? Number(fare.units) + (fare.nanos ?? 0) / 1_000_000_000 : null;
-    return { from_spot_id: from.id, to_spot_id: to.id, mode, minutes: duration, walkingMeters, fareYen, source: "google-routes",
-      source_url: "https://developers.google.com/maps/documentation/routes/overview" };
-  }
-  return null;
 }
 
 async function recommend(courses: Course[], budget: number): Promise<{ id: string; reason: string; source: "gemini" | "rule" }> {
@@ -207,10 +162,9 @@ export async function POST(request: Request) {
       // At most 20 directed pairs and 40 API calls per plan; limit concurrency.
       for (let offset = 0; offset < pairs.length; offset += 4) {
         await Promise.all(pairs.slice(offset, offset + 4).map(async ({ from, to }) => {
-          const results = await Promise.allSettled([googleLeg(from, to, "walking", input.visitDate, routeKey), googleLeg(from, to, "transit", input.visitDate, routeKey)]);
-          const choices = results.filter((item): item is PromiseFulfilledResult<RouteLeg | null> => item.status === "fulfilled").map((item) => item.value).filter((leg): leg is RouteLeg => leg !== null);
-          const chosen = choices.sort((a, b) => a.minutes - b.minutes)[0];
-          if (chosen) byPair.set(`${from.id}/${to.id}`, chosen);
+          const leg = await computeLeg(from, to, input.visitDate, routeKey);
+          if (leg) byPair.set(`${from.id}/${to.id}`, { from_spot_id: from.id, to_spot_id: to.id, ...leg, source: "google-routes",
+            source_url: "https://developers.google.com/maps/documentation/routes/overview" });
         }));
       }
       if (byPair.size) source = "google-routes";
@@ -225,7 +179,7 @@ export async function POST(request: Request) {
       const registered = await legsResponse.json() as VerifiedLeg[];
       for (const leg of registered) {
         if (input.spotIds.includes(leg.to_spot_id) && !byPair.has(`${leg.from_spot_id}/${leg.to_spot_id}`))
-          byPair.set(`${leg.from_spot_id}/${leg.to_spot_id}`, { ...leg, walkingMeters: null, fareYen: null, source: "registered" });
+          byPair.set(`${leg.from_spot_id}/${leg.to_spot_id}`, { ...leg, walkingMeters: null, fareYen: null, transitKind: null, alternative: null, source: "registered" });
       }
     }
     // 聖地を軸にする：聖地の訪問順ごとに、寄り道は聖地と聖地の区間の中で移動が最も短くなる位置に入れる。

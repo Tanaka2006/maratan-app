@@ -8,6 +8,10 @@ import type { ResearchWork } from "../_data/research-works";
 import type { ResearchSpot } from "../_data/research-spots";
 import { displayVersion } from "../_data/work-genres";
 import DetourCard, { DetourNote, pickRecommendedDetours } from "./detour-card";
+import LegSummary from "./leg-summary";
+import type { LegOption, TransitKind } from "../_data/transit-label";
+
+type LegResult = LegOption & { walkingMeters: number | null; fareYen: number | null; alternative: LegOption | null; transitKind: TransitKind | null };
 
 const MAX_STOPS = 3;
 const MAX_DETOURS = 2;
@@ -22,17 +26,19 @@ function todayInJapan() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
-function pointDirectionsUrl(from: RoutePoint, to: RoutePoint) {
-  const params = new URLSearchParams({ api: "1", origin: from.query, destination: to.query });
+function pointDirectionsUrl(from: RoutePoint, to: RoutePoint, mode: "walking" | "transit" = "transit") {
+  const params = new URLSearchParams({ api: "1", origin: from.query, destination: to.query, travelmode: mode });
   if (from.placeId) params.set("origin_place_id", from.placeId);
   if (to.placeId) params.set("destination_place_id", to.placeId);
   return `https://www.google.com/maps/dir/?${params}`;
 }
 
-function pointRouteUrl(points: RoutePoint[]) {
+function pointRouteUrl(points: RoutePoint[], allWalking: boolean) {
   const first = points[0];
   const last = points[points.length - 1];
   const params = new URLSearchParams({ api: "1", origin: first.query, destination: last.query });
+  // Googleマップは電車・バスの経路に経由地を入れられないため、全区間が徒歩のときだけ徒歩で開く。
+  if (allWalking) params.set("travelmode", "walking");
   if (first.placeId) params.set("origin_place_id", first.placeId);
   if (last.placeId) params.set("destination_place_id", last.placeId);
   const middle = points.slice(1, -1);
@@ -87,6 +93,7 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
   const [selectedDetourIds, setSelectedDetourIds] = useState<string[]>([]);
   const detourKey = useRef("");
   const detourCache = useRef(new Map<string, DetourSearch>());
+  const [legCache, setLegCache] = useState<Record<string, Array<LegResult | null>>>({});
   const visitDateRef = useRef(visitDate);
   const version = displayVersion(work.version);
 
@@ -192,6 +199,23 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
     return detour ? [{ id, name: detour.name, query: detour.name, placeId: detour.place_id, detour }] : [];
   });
   const recommended = pickRecommendedDetours(detours, visitDate, MAX_DETOURS);
+
+  // 位置が分かった地点どうしなら、区間ごとに「徒歩 約○分／バスで約○分」を調べる。
+  const legKey = points.length > 1 && points.every((point) => point.placeId) ? `${visitDate}|${points.map((point) => point.placeId).join(",")}` : "";
+  const legs = legKey ? legCache[legKey] : undefined;
+  useEffect(() => {
+    if (!legKey || legCache[legKey] !== undefined) return;
+    const [date, ids] = legKey.split("|");
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch("/api/legs", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ placeIds: ids.split(","), visitDate: date }) })
+        .then(async (response) => response.ok ? (await response.json()).legs as Array<LegResult | null> : null)
+        .then((result) => { if (result) setLegCache((current) => ({ ...current, [legKey]: result })); })
+        .catch(() => undefined);
+    }, 500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [legKey, legCache]);
   const single = spots.length === 1 ? spots[0] : null;
 
   return <section className="screen-section research-course-screen">
@@ -248,11 +272,12 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
                     <button type="button" onClick={() => moveSpot(point.id, 1)} disabled={seichiIndex === ordered.length - 1} aria-label={`${point.name}を一つ後へ`}>↓</button>
                   </div> : null}
               </div>
-              {points[index + 1] ? <a className="plan-leg" href={pointDirectionsUrl(point, points[index + 1])} target="_blank" rel="noreferrer">次までの経路 ↗</a> : null}
+              {points[index + 1] ? legs?.[index] ? <div className="plan-leg-box"><LegSummary leg={legs[index]!} href={pointDirectionsUrl(point, points[index + 1], legs[index]!.mode)} /></div>
+                : <a className="plan-leg" href={pointDirectionsUrl(point, points[index + 1])} target="_blank" rel="noreferrer">次までの経路 ↗</a> : null}
             </li>;
           })}</ol>
-          {points.length > 1 ? <a className="primary-button" href={pointRouteUrl(points)} target="_blank" rel="noreferrer">この順番でGoogleマップを開く ↗</a> : null}
-          <p className="field-hint">移動時間と営業状況は、Googleマップで訪問日時を指定して確認してください。</p>
+          {points.length > 1 ? <a className="primary-button" href={pointRouteUrl(points, Boolean(legs?.length && legs.every((leg) => leg?.mode === "walking")))} target="_blank" rel="noreferrer">この順番でGoogleマップを開く ↗</a> : null}
+          <p className="field-hint">{legs?.some(Boolean) ? "移動時間は訪問日の昼ごろに出発した場合の目安です。バスの本数や営業時間は、各「経路」とお店の情報で確認してください。" : "移動時間と営業状況は、Googleマップで訪問日時を指定して確認してください。"}</p>
 
           <div className="research-detours" aria-busy={detourState.status === "loading"}>
             <h3>③ 寄り道を入れ替える</h3>

@@ -134,3 +134,22 @@ test("訪問順は聖地を軸にし、寄り道は聖地と聖地の区間の�
   // 移動時間が分からない区間しかなければ null
   assert.equal(bestAxisOrder(["A", "B"], ["x"], () => null), null);
 });
+
+test("区間の移動手段を「徒歩」「バス」「電車」に分けて表示する", async () => {
+  const { transitKindOf, legText, chooseLeg, showAlternative } = await import("../app/_data/transit-label.ts");
+  assert.equal(transitKindOf(["BUS"]), "bus");
+  assert.equal(transitKindOf(["HEAVY_RAIL", "COMMUTER_TRAIN"]), "train");
+  assert.equal(transitKindOf(["BUS", "SUBWAY"]), "mixed");
+  assert.equal(transitKindOf([]), null);
+  assert.equal(legText({ mode: "transit", minutes: 12, transitKind: "bus" }), "バスで約12分");
+  assert.equal(legText({ mode: "walking", minutes: 8, transitKind: null }), "徒歩 約8分");
+  const walk = { mode: "walking", minutes: 25, transitKind: null };
+  const bus = { mode: "transit", minutes: 12, transitKind: "bus" };
+  assert.deepEqual(chooseLeg(walk, bus), { chosen: bus, alternative: walk });
+  // ほぼ同じなら待ち時間の読めないバスより徒歩
+  assert.equal(chooseLeg({ ...walk, minutes: 14 }, bus).chosen.mode, "walking");
+  assert.equal(chooseLeg(null, null), null);
+  assert.equal(showAlternative(bus, walk), true, "バスの区間は徒歩の分数も見せる");
+  assert.equal(showAlternative({ ...walk, minutes: 6 }, bus), false, "短い徒歩ならバスは出さない");
+  assert.equal(showAlternative({ ...walk, minutes: 20 }, bus), true);
+});
