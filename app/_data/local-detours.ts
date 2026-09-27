@@ -11,7 +11,13 @@ export type DetourSlot =
 
 export type PlacePeriod = { open?: { day?: number; hour?: number; minute?: number }; close?: { day?: number; hour?: number; minute?: number } };
 
-export type GroundedPlace = { placeId: string; title: string; uri: string };
+/** Googleマップ グラウンディングの結果。aliases には Places API の日本語名などを入れる。 */
+export type GroundedPlace = { placeId: string; title: string; uri: string; aliases?: string[] };
+
+/** 「Ajidokoro Furukawa - Google Maps」の末尾の「 - Google Maps」を外す。 */
+export function cleanGroundedTitle(title: string) {
+  return title.replace(/\s*[-–—|｜]\s*Google\s*(?:Maps|マップ)\s*$/i, "").trim();
+}
 
 export const DETOUR_CATEGORY_LABELS: Record<DetourCategory, string> = {
   food: "地元の食",
@@ -226,7 +232,7 @@ export type GeminiDetourPick = { name: string; localFeature: string; reason: str
 export function matchGroundedPicks(raw: unknown, grounded: readonly GroundedPlace[]): Array<GeminiDetourPick & { placeId: string; mapsUri: string }> {
   const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { places?: unknown }).places) ? (raw as { places: unknown[] }).places : [];
   const byId = new Map(grounded.map((place) => [place.placeId, place]));
-  const byName = new Map(grounded.map((place) => [normalizeName(place.title), place]));
+  const names = grounded.map((place) => ({ place, keys: [place.title, ...(place.aliases ?? [])].map((name) => normalizeName(cleanGroundedTitle(name))).filter(Boolean) }));
   const results: Array<GeminiDetourPick & { placeId: string; mapsUri: string }> = [];
   const seen = new Set<string>();
   for (const item of list) {
@@ -238,11 +244,11 @@ export function matchGroundedPicks(raw: unknown, grounded: readonly GroundedPlac
     if (!name || !localFeature || !reason) continue;
     const idHint = normalizePlaceId(candidate.placeId);
     const key = normalizeName(name);
-    const match = (idHint && byId.get(idHint)) || byName.get(key)
-      || grounded.find((place) => { const title = normalizeName(place.title); return key.length >= 3 && (title.includes(key) || key.includes(title)); });
+    const match = (idHint && byId.get(idHint)) || names.find((item) => item.keys.includes(key))?.place
+      || names.find((item) => key.length >= 3 && item.keys.some((title) => title.length >= 3 && (title.includes(key) || key.includes(title))))?.place;
     if (!match || seen.has(match.placeId)) continue;
     seen.add(match.placeId);
-    results.push({ name: match.title, localFeature, reason, placeId: match.placeId, mapsUri: match.uri });
+    results.push({ name: match.aliases?.[0] ?? cleanGroundedTitle(match.title), localFeature, reason, placeId: match.placeId, mapsUri: match.uri });
   }
   return results;
 }

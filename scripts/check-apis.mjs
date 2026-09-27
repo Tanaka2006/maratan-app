@@ -87,7 +87,7 @@ await check("Gemini + Googleマップ グラウンディング（寄り道探し
     const chunks = (data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []).filter((chunk) => chunk.maps?.placeId);
     if (!chunks.length) { errors.push(`${model}: Googleマップの根拠が返りませんでした`); continue; }
     groundingOk = true;
-    return `${model} で ${chunks.length} 件（例：${chunks[0].maps.title}）${model !== models[0] ? `／先に試したモデルは失敗：${errors.join("、")}` : ""}`;
+    return `${model} で ${chunks.length} 件（例：${chunks[0].maps.title.replace(/\s*[-–—|｜]\s*Google\s*(?:Maps|マップ)\s*$/i, "")}）${model !== models[0] ? `／先に試したモデルは失敗：${errors.join("、")}` : ""}`;
   }
   throw new Error(errors.join("\n   "));
 });
