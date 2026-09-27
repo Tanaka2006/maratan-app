@@ -51,6 +51,8 @@ export type VerifiedSpot = {
   opening_hours_text?: string | null;
   weekday_hours?: string[] | null;
   // Places API (New) の「AIによるクチコミ要約」。保存せず、取得のたびにそのまま表示する。
+  // 「食・お店から探す」で利用者が選んだ店。コースに必ず入れる候補にする。
+  pinned?: boolean;
   review_summary?: { text: string; disclosure: string; flagUri: string; reviewsUri: string } | null;
   detour_source?: "gemini-maps" | "places-search";
 };

@@ -9,16 +9,27 @@ import type { ResearchSpot } from "../_data/research-spots";
 import { displayVersion } from "../_data/work-genres";
 import DetourCard, { DetourNote, pickRecommendedDetours } from "./detour-card";
 import LegSummary from "./leg-summary";
+import ShareCourse from "./share-course";
+import { courseUrl, sharedSelection, type CourseOptions } from "../_data/course-url";
 import type { LegOption, TransitKind } from "../_data/transit-label";
 
 type LegResult = LegOption & { walkingMeters: number | null; fareYen: number | null; alternative: LegOption | null; transitKind: TransitKind | null };
 
 const MAX_STOPS = 3;
 const MAX_DETOURS = 2;
+/** 調査リストの聖地には滞在時間の登録がないため、見学・撮影の目安として使う。 */
+const SEICHI_STAY_MINUTES = 20;
+
+function formatMinutes(total: number) {
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (!hours) return `${minutes}分`;
+  return minutes ? `${hours}時間${minutes}分` : `${hours}時間`;
+}
 
 type Anchor = { id: string; latitude: number; longitude: number; placeId: string; mapsUri: string | null };
-type DetourSearch = { detours: VerifiedDetour[]; anchors: Anchor[]; unlocated: string[] };
-type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; unlocated?: string[] };
+type DetourSearch = { detours: VerifiedDetour[]; anchors: Anchor[]; unlocated: string[]; pinned: "included" | "out-of-reach" | "none" };
+type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; unlocated?: string[]; pinned?: "included" | "out-of-reach" | "none" };
 /** 経路リンクに渡す1地点。聖地は名称で、位置を特定できた地点と寄り道は Place ID も渡す。 */
 type RoutePoint = { id: string; name: string; query: string; placeId: string | null; detour: VerifiedDetour | null };
 
@@ -80,7 +91,7 @@ function SpotDetails({ spot }: { spot: ResearchSpot }) {
   </details>;
 }
 
-export default function ResearchCourse({ work, region, onBack }: { work: ResearchWork; region: string; onBack: () => void }) {
+export default function ResearchCourse({ work, region, options, onBack }: { work: ResearchWork; region: string; options?: CourseOptions; onBack: () => void }) {
   const [spots, setSpots] = useState<ResearchSpot[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +106,8 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
   const detourCache = useRef(new Map<string, DetourSearch>());
   const [legCache, setLegCache] = useState<Record<string, Array<LegResult | null>>>({});
   const visitDateRef = useRef(visitDate);
+  const planRef = useRef<HTMLElement | null>(null);
+  const scrolledToPlan = useRef(false);
   const version = displayVersion(work.version);
 
   useEffect(() => {
@@ -104,11 +117,15 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
       const data = await response.json();
       const matching = (Array.isArray(data.spots) ? data.spots : []).filter((spot: ResearchSpot) => spot.region === region);
       setSpots(matching);
-      setSelectedIds(matching.slice(0, MAX_STOPS).map((spot: ResearchSpot) => spot.id));
+      // 共有リンクで聖地が指定されていれば、その並びで始める。
+      const ids = matching.map((spot: ResearchSpot) => spot.id);
+      setSelectedIds(sharedSelection(options?.spots, ids, MAX_STOPS) ?? ids.slice(0, MAX_STOPS));
       setError("");
       setLoading(false);
     }).catch(() => { if (!controller.signal.aborted) { setError("地点を取得できませんでした。通信状況を確認して、もう一度お試しください。"); setLoading(false); } });
     return () => controller.abort();
+    // 共有リンクの指定は最初の読み込み時だけ使う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [work.id, region, attempt]);
 
   // 地点の並び順に関係なく、同じ組み合わせなら同じ寄り道を使う。
@@ -126,7 +143,7 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
       setDetours(found.detours);
       setAnchors(found.anchors);
       setSelectedDetourIds(pickRecommendedDetours(found.detours, visitDateRef.current, MAX_DETOURS));
-      setDetourState({ status: "ready", unlocated: found.unlocated });
+      setDetourState({ status: "ready", unlocated: found.unlocated, pinned: found.pinned });
     };
     const cached = detourCache.current.get(key);
     if (cached) { apply(cached); return; }
@@ -136,19 +153,27 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
     setDetourState({ status: "loading" });
     try {
       const response = await fetch("/api/detours", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workId: work.id, region, researchSpotIds: ids, visitDate: visitDateRef.current }) });
+        body: JSON.stringify({ workId: work.id, region, researchSpotIds: ids, visitDate: visitDateRef.current, ...(options?.pin ? { pinPlaceId: options.pin } : {}) }) });
       const data = await response.json();
       if (detourKey.current !== key) return;
       if (!response.ok) throw new Error(data.error || "寄り道候補を取得できませんでした。");
       const found: DetourSearch = { detours: Array.isArray(data.detours) ? data.detours : [], anchors: Array.isArray(data.anchors) ? data.anchors : [],
-        unlocated: Array.isArray(data.unlocated) ? data.unlocated : [] };
+        unlocated: Array.isArray(data.unlocated) ? data.unlocated : [], pinned: data.pinned === "included" || data.pinned === "out-of-reach" ? data.pinned : "none" };
       detourCache.current.set(key, found);
       apply(found);
     } catch (fetchError) {
       if (detourKey.current !== key) return;
       setDetourState({ status: "error", message: fetchError instanceof Error ? fetchError.message : "寄り道候補を取得できませんでした。" });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [work.id, region]);
+
+  // 「食・お店から探す」から来たときは、選んだ店が入ったコースをすぐ見られるようにする。
+  useEffect(() => {
+    if (!options?.pin || scrolledToPlan.current || detourState.status !== "ready") return;
+    scrolledToPlan.current = true;
+    planRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [options?.pin, detourState.status]);
 
   // 地点の選択が落ち着いたら自動で探す（チェックを続けて付け外ししている間は待つ）。
   useEffect(() => {
@@ -216,33 +241,28 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
     }, 500);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [legKey, legCache]);
-  const single = spots.length === 1 ? spots[0] : null;
+  // 現地での所要時間の目安：滞在（聖地は目安20分、寄り道は種類ごとの目安）＋ 区間ごとの移動。
+  const stayMinutes = points.reduce((sum, point) => sum + (point.detour ? point.detour.stay_minutes : SEICHI_STAY_MINUTES), 0);
+  const legsKnown = points.length < 2 || Boolean(legs && legs.length === points.length - 1 && legs.every(Boolean));
+  const moveMinutes = legsKnown && legs ? legs.reduce((sum, leg) => sum + (leg?.minutes ?? 0), 0) : 0;
+  const sharePath = courseUrl(work.id, region, { spots: selectedIds, pin: options?.pin });
 
   return <section className="screen-section research-course-screen">
     <button className="text-back" type="button" onClick={onBack}>← 作品一覧へ戻る</button>
     <div className="section-heading"><div>
       <p className="page-kicker"><span>{region}</span>{version ? <span>{version}</span> : null}</p>
       <h1>{work.title}</h1>
-      <p>{single ? "この地域で掲載している地点です。" : `巡りたい地点を最大${MAX_STOPS}件選ぶと、訪問順の案と、途中で寄れる地域の食・文化スポットを探せます。`}</p>
+      <p>{spots.length === 1 ? "この地域の聖地と、その前後で寄れる地元の味・文化スポットをつないだコースを作ります。" : `巡りたい聖地を最大${MAX_STOPS}件選ぶと、訪問順の案と、途中で寄れる地元の味・文化スポットが分かります。`}</p>
     </div></div>
 
     {loading ? <p className="loading-note" role="status">地点を読み込んでいます…</p> : null}
     {error ? <div className="inline-error" role="alert"><p>{error}</p><button className="text-button" type="button" onClick={() => { setError(""); setLoading(true); setAttempt((value) => value + 1); }}>再読み込み</button></div> : null}
 
-    {!loading && !error && single ? <article className="research-single">
-      <h2>{single.name}</h2>
-      {spotNotes(single).map((note) => <p className="research-source-warning" key={note.tag}>{note.detail}</p>)}
-      <div className="disclosure-links">
-        <a href={placeUrl(single)} target="_blank" rel="noreferrer">Googleマップで場所を見る ↗</a>
-        <a href={single.sourceUrl} target="_blank" rel="noreferrer">出典 ↗</a>
-      </div>
-    </article> : null}
-
-    {!loading && !error && spots.length > 1 ? <div className="research-course-layout">
+    {!loading && !error && spots.length ? <div className="research-course-layout">
       <section aria-labelledby="choose-heading">
         <div className="choose-heading">
-          <h2 id="choose-heading">① 巡る地点を選ぶ</h2>
-          <span className="choose-count" role="status">{selectedIds.length}／{MAX_STOPS}件</span>
+          <h2 id="choose-heading">{spots.length === 1 ? "① この地域の聖地" : "① 巡る聖地を選ぶ"}</h2>
+          {spots.length > 1 ? <span className="choose-count" role="status">{selectedIds.length}／{MAX_STOPS}件</span> : null}
         </div>
         <ul className="choose-list">{spots.map((spot) => {
           const checked = selectedIds.includes(spot.id);
@@ -255,8 +275,13 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
         {selectedIds.length >= MAX_STOPS && spots.length > MAX_STOPS ? <p className="field-hint">入れ替えるときは、選択中の地点のチェックを外してください。</p> : null}
       </section>
 
-      <section className="research-course-result" aria-labelledby="plan-heading" aria-live="polite">
+      <section ref={planRef} className="research-course-result" aria-labelledby="plan-heading" aria-live="polite">
         <h2 id="plan-heading">② 訪問順の案</h2>
+        {ordered.length ? <div className="plan-summary">
+          <p>現地での所要時間の目安 <b>{legsKnown ? `約${formatMinutes(stayMinutes + moveMinutes)}` : "計算中…"}</b></p>
+          <small>{legsKnown ? `滞在 約${formatMinutes(stayMinutes)}${points.length > 1 ? `・移動 約${formatMinutes(moveMinutes)}` : ""}` : `滞在 約${formatMinutes(stayMinutes)}・移動時間を調べています`}。最初の地点までと最後の地点からの移動は含みません。</small>
+        </div> : null}
+        {detourState.pinned === "out-of-reach" ? <p className="field-hint">選んだお店は聖地から離れているため、コースには入れていません。</p> : null}
         {selectedDetourIds.length ? <p className="detour-included">聖地の区間の途中に、地元の味や文化にふれられる<b>寄り道</b>を入れています。不要なら「✕」で外せます。</p> : null}
         {detourState.status === "loading" ? <p className="loading-note" role="status">寄り道を探しています…</p> : null}
         {ordered.length ? <>
@@ -277,6 +302,7 @@ export default function ResearchCourse({ work, region, onBack }: { work: Researc
             </li>;
           })}</ol>
           {points.length > 1 ? <a className="primary-button" href={pointRouteUrl(points, Boolean(legs?.length && legs.every((leg) => leg?.mode === "walking")))} target="_blank" rel="noreferrer">この順番でGoogleマップを開く ↗</a> : null}
+          <ShareCourse path={sharePath} title={`${work.title}・${region}のコース`} />
           <p className="field-hint">{legs?.some(Boolean) ? "移動時間は訪問日の昼ごろに出発した場合の目安です。バスの本数や営業時間は、各「経路」とお店の情報で確認してください。" : "移動時間と営業状況は、Googleマップで訪問日時を指定して確認してください。"}</p>
 
           <div className="research-detours" aria-busy={detourState.status === "loading"}>

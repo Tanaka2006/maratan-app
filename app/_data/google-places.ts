@@ -241,14 +241,16 @@ async function describeSearchCandidates(candidates: Array<{ placeId: string; nam
   } catch { return new Map(); }
 }
 
-export type DetourSearchResult = { detours: VerifiedDetour[]; source: "gemini-maps" | "places-search" | "mixed" | "none" };
+export type DetourSearchResult = { detours: VerifiedDetour[]; source: "gemini-maps" | "places-search" | "mixed" | "none";
+  /** 利用者が選んだ店（pinnedPlaceId）の扱い。遠すぎる店はコースに入れない。 */
+  pinned: "included" | "out-of-reach" | "none" };
 
 /**
  * 選んだ聖地の間・前後で、地域の食や文化に触れられる寄り道を探す。
  * 1) Gemini + Google マップ グラウンディング → 2) 足りなければ Places テキスト検索 の順に試し、
  * どちらの候補も Places API の詳細で実在・営業状態・位置を確かめてから返す。
  */
-export async function searchLocalDetours(spots: DetourAnchor[], region: string, visitDate: string, placesKey: string, geminiKey: string): Promise<DetourSearchResult> {
+export async function searchLocalDetours(spots: DetourAnchor[], region: string, visitDate: string, placesKey: string, geminiKey: string, pinnedPlaceId?: string): Promise<DetourSearchResult> {
   const names = Object.fromEntries(spots.map((spot) => [spot.id, spot.name]));
   const seichiNames = new Set(spots.map((spot) => normalizeName(spot.name)));
   const accepted = new Map<string, VerifiedDetour>();
@@ -272,6 +274,12 @@ export async function searchLocalDetours(spots: DetourAnchor[], region: string, 
     sources.add(text.source);
   }
 
+  // 「食・お店から探す」で選ばれた店は、ほかの候補より先に確認する。
+  if (pinnedPlaceId) {
+    await accept(pinnedPlaceId, { localFeature: null, reason: null, source: "places-search" });
+    const pinned = accepted.get(pinnedPlaceId);
+    if (pinned) pinned.pinned = true;
+  }
   if (geminiKey) {
     try {
       const picks = await geminiMapsCandidates(spots, region, geminiKey, getDetails);
@@ -290,9 +298,11 @@ export async function searchLocalDetours(spots: DetourAnchor[], region: string, 
     }
   }
   // 聖地と聖地の区間の途中にある（遠回りが少ない）順に並べる。先頭の候補が最初からコースに入る。
-  const detours = [...accepted.values()].sort((a, b) => intervalDetourCost(a, spots) - intervalDetourCost(b, spots)).slice(0, MAX_DETOUR_RESULTS);
+  // 利用者が選んだ店を先頭にする。
+  const detours = [...accepted.values()].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || intervalDetourCost(a, spots) - intervalDetourCost(b, spots)).slice(0, MAX_DETOUR_RESULTS);
   const source = sources.size === 2 ? "mixed" : sources.has("gemini-maps") ? "gemini-maps" : sources.has("places-search") ? "places-search" : "none";
-  return { detours, source };
+  const pinned = !pinnedPlaceId ? "none" : detours.some((spot) => spot.id === pinnedPlaceId) ? "included" : "out-of-reach";
+  return { detours, source, pinned };
 }
 
 /**

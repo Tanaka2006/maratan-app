@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,11 +12,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const description = "好きな作品の聖地と、その間で寄れる地元の味・文化スポットをつないだまち歩きコースを作れるアプリ。区間ごとの徒歩・バスの目安と Google マップでの経路確認まで。";
+
 export const metadata: Metadata = {
   title: "まちぽ｜物語の場所から、まちを歩こう。",
-  description: "作品と地域を選ぶと、聖地を巡る順番と移動時間の目安が分かるまち歩きコース作成アプリ。",
+  description,
   icons: { apple: "/app-icon.png" },
+  openGraph: { title: "まちぽ｜物語の場所から、まちを歩こう。", description, type: "website", locale: "ja_JP", images: ["/app-icon.png"] },
+  twitter: { card: "summary", title: "まちぽ｜物語の場所から、まちを歩こう。", description },
 };
+
+export const viewport: Viewport = { themeColor: "#ef6d24" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
