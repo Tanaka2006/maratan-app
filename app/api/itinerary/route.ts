@@ -1,5 +1,7 @@
 import type { VerifiedLeg, VerifiedSpot } from "../../_data/anilist-types";
 import { isKnownClosed, type VerifiedCourse } from "../../_data/real-planner";
+import { detourFromPlace, fetchPlaceDetails, placesApiKey } from "../../_data/google-places";
+import { isPlaceId, isWithinReach } from "../../_data/local-detours";
 
 export const runtime = "nodejs";
 
@@ -41,7 +43,7 @@ function validate(value: unknown): Input | null {
     item.spotIds.some((id) => typeof id !== "string" || !/^p_[a-z0-9]+$/.test(id)) ||
     new Set(item.spotIds).size !== item.spotIds.length) return null;
   if (item.detourIds !== undefined && (!Array.isArray(item.detourIds) || item.detourIds.length > 2 || item.detourIds.length + item.spotIds.length > 5 ||
-    item.detourIds.some((id) => typeof id !== "string" || !/^d_[a-z0-9]+$/.test(id)) || new Set(item.detourIds).size !== item.detourIds.length)) return null;
+    item.detourIds.some((id) => !isPlaceId(id)) || new Set(item.detourIds).size !== item.detourIds.length)) return null;
   if (typeof item.visitDate !== "string" || !validDate(item.visitDate)) return null;
   if (!Number.isInteger(item.availableMinutes) || item.availableMinutes! < 30 || item.availableMinutes! > 720) return null;
   if (item.stayMinutes !== undefined && (typeof item.stayMinutes !== "object" || item.stayMinutes === null || Array.isArray(item.stayMinutes) ||
@@ -110,7 +112,7 @@ async function recommend(courses: Course[], budget: number): Promise<{ id: strin
       ? `概算では地点間移動が約${course.moveMinutes}分で、指定時間に約${margin}分の余裕があります。`
       : `概算では指定時間を約${-margin}分超えるため、周遊時間の変更が必要です。`;
     const detour = course.stops.find((spot) => spot.kind === "detour");
-    return `${timeReason}${detour ? `登録済みの寄り道「${detour.name}」を含みます。` : "選んだ聖地をすべて含みます。"}`;
+    return `${timeReason}${detour ? `地域の寄り道「${detour.name}」を含みます。` : "選んだ聖地をすべて含みます。"}`;
   };
   const fallbackResult = { id: fallback.id, reason: groundedReason(fallback), source: "rule" as const };
   const key = process.env.GEMINI_API_KEY;
@@ -180,34 +182,24 @@ export async function POST(request: Request) {
         for (const spot of spots) Object.assign(spot, byId.get(spot.id));
       }
     }
+    // 寄り道は Gemini・Google マップで見つけた Place ID だけを受け取り、Places API で位置と営業状態を取り直す。
     let detours: VerifiedSpot[] = [];
     if (input.detourIds?.length) {
-      const detoursUrl = new URL(`${url}/rest/v1/verified_local_detours`);
-      detoursUrl.searchParams.set("select", "id,name,region,latitude,longitude,source_url,access_note,stay_minutes,closed_weekdays,exceptional_closed_dates,local_relevance,category,official_url,hours_status,last_admission,reservation_status,reference_price_yen");
-      detoursUrl.searchParams.set("region", `eq.${input.region}`);
-      detoursUrl.searchParams.set("id", `in.(${input.detourIds.join(",")})`);
-      const detoursResponse = await fetch(detoursUrl, { headers, cache: "no-store", signal: AbortSignal.timeout(7000) });
-      if (!detoursResponse.ok) throw new Error("detours unavailable");
-      const rows = await detoursResponse.json() as Array<Record<string, unknown>>;
-      if (!Array.isArray(rows) || rows.length !== input.detourIds.length) return Response.json({ error: "選択した確認済み寄り道を取得できません。" }, { status: 422 });
-      detours = rows.map((row) => ({ id: String(row.id), work_id: input.workId, name: String(row.name), region: String(row.region),
-        latitude: Number(row.latitude), longitude: Number(row.longitude), source_url: String(row.source_url), coordinate_source_url: null,
-        access_note: String(row.access_note ?? ""), stay_minutes: Number(row.stay_minutes), closed_weekdays: row.closed_weekdays as number[],
-        closed_last_friday: false, exceptional_closed_dates: (row.exceptional_closed_dates ?? []) as string[],
-        notes: String(row.local_relevance ?? ""), kind: "detour", category: String(row.category), local_relevance: String(row.local_relevance),
-        official_url: typeof row.official_url === "string" ? row.official_url : null,
-        hours_status: row.hours_status === "no_hours" || row.hours_status === "hours_known" ? row.hours_status : "unknown",
-        last_admission: typeof row.last_admission === "string" ? row.last_admission : null,
-        reservation_status: row.reservation_status === "required" || row.reservation_status === "not_required" ? row.reservation_status : "unknown",
-        reference_price_yen: typeof row.reference_price_yen === "number" ? row.reference_price_yen : null }));
-      if (detours.some((spot) => !Number.isFinite(spot.latitude) || !Number.isFinite(spot.longitude) || !Number.isInteger(spot.stay_minutes)))
-        return Response.json({ error: "寄り道の座標または滞在時間が不正です。" }, { status: 422 });
+      const placesKey = placesApiKey();
+      if (!placesKey) return Response.json({ error: "寄り道の情報を確認できません。Google Places APIの設定を確認してください。" }, { status: 503 });
+      const details = await Promise.all(input.detourIds.map((id) => fetchPlaceDetails(id, placesKey)));
+      const found = details.map((place) => place ? detourFromPlace(place, input.region, input.visitDate, { localFeature: null, reason: null, source: "gemini-maps" }) : null);
+      if (found.some((spot) => !spot)) return Response.json({ error: "選んだ寄り道の情報をGoogleマップで確認できませんでした。営業を終了した可能性があります。" }, { status: 422 });
+      detours = found as VerifiedSpot[];
+      if (detours.some((spot) => !isWithinReach(spot, spots)))
+        return Response.json({ error: "選んだ寄り道が聖地から離れすぎています。別の寄り道を選んでください。" }, { status: 422 });
     }
     const stops = [...spots.map((spot) => ({ ...spot, kind: "seichi" as const })), ...detours];
     const closed = stops.filter((spot) => isKnownClosed(spot, input.visitDate));
     if (closed.length) return Response.json({ status: "closed", error: `${closed.map((spot) => spot.name).join("、")}は選んだ日が休業日です。訪問日を変更してください。` }, { status: 422 });
 
     const routeKey = process.env.GOOGLE_ROUTES_API_KEY;
+    if (detours.length && !routeKey) return Response.json({ status: "unavailable", error: "寄り道を含む移動時間の計算にはGoogle Routes APIの設定が必要です。" }, { status: 503 });
     const byPair = new Map<string, RouteLeg>();
     let source: "google-routes" | "registered" | "mixed" = "registered";
     if (routeKey && stops.length > 1) {
@@ -244,7 +236,7 @@ export async function POST(request: Request) {
       const stayMinutes = ordered.reduce((sum, spot) => sum + (input.stayMinutes?.[spot.id] ?? spot.stay_minutes), 0);
       const moveMinutes = complete.reduce((sum, leg) => sum + leg.minutes, 0);
       const bufferMinutes = 20;
-      return [{ id: ordered.map((spot) => spot.id).join("-"), stops: ordered, legs: complete, stayMinutes, moveMinutes, bufferMinutes, totalMinutes: stayMinutes + moveMinutes + bufferMinutes }];
+      return [{ id: ordered.map((spot) => spot.id).join("~"), stops: ordered, legs: complete, stayMinutes, moveMinutes, bufferMinutes, totalMinutes: stayMinutes + moveMinutes + bufferMinutes }];
     }).sort((a, b) => (a.totalMinutes <= input.availableMinutes ? 0 : 1) - (b.totalMinutes <= input.availableMinutes ? 0 : 1) || a.moveMinutes - b.moveMinutes);
     if (!courses.length) return Response.json({ error: "選択地点間の経路が不足しています。API障害・対象期間外・未登録の可能性があります。地点や日付を変えるか、後で再試行してください。", status: "unavailable" }, { status: 422 });
     const withinBudget = courses.filter((item) => item.totalMinutes <= input.availableMinutes);
@@ -268,6 +260,7 @@ export async function POST(request: Request) {
       stops.length === 1 ? "訪問地点が1件のため、地点間の移動はありません。" : source !== "google-routes" ? "移動時間に登録済みの区間データを含みます。各区間の出典も確認してください。" : null,
       longWalk ? `徒歩で約${(longestWalk / 1000).toFixed(1)}km歩く区間があります。体力や天候に合わせて、バスやタクシーも検討してください。` : null,
       !conditionsKnown ? "営業時間・最終入場・予約の要否は、まだ確認できていない地点があります。" : null,
+      detours.length ? "地域の寄り道はGeminiとGoogleマップの情報から選んだ候補です。訪問時間帯の営業・定休日・混雑は、各店舗・施設の公式情報で確認してください。" : null,
       !longWalk && course.legs.length && course.legs.every((leg) => leg.mode === "walking") ? "このコースはすべて徒歩の区間です。電車・バスのほうが楽な場合もあるため、Googleマップでも確認してください。" : null,
     ].filter((notice): notice is string => notice !== null) }, { headers: { "Cache-Control": "no-store" } });
   } catch {

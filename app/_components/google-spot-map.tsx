@@ -41,6 +41,16 @@ function pinElement(label: string, name: string) {
   return pin;
 }
 
+const DETOUR_PIN_LABELS: Record<string, string> = { food: "食", shopping: "品", culture: "文", experience: "体" };
+
+function detourPinElement(spot: VerifiedSpot) {
+  const pin = document.createElement("div");
+  pin.className = "map-detour-pin";
+  pin.textContent = DETOUR_PIN_LABELS[spot.category ?? ""] ?? "寄";
+  pin.setAttribute("aria-label", `地域の寄り道：${spot.name}`);
+  return pin;
+}
+
 function highlightMarkers(list: Array<{ id: string; marker: Marker; pin: HTMLElement }>, activeId: string) {
   for (const { id, marker, pin } of list) {
     const active = id === activeId;
@@ -49,8 +59,9 @@ function highlightMarkers(list: Array<{ id: string; marker: Marker; pin: HTMLEle
   }
 }
 
-export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
+export default function GoogleSpotMap({ spots, detours = [], activeId, onSelect, fallback }: {
   spots: VerifiedSpot[];
+  detours?: VerifiedSpot[];
   activeId: string;
   onSelect: (id: string) => void;
   fallback: React.ReactNode;
@@ -58,6 +69,9 @@ export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
   const element = useRef<HTMLDivElement | null>(null);
   const map = useRef<MapInstance | null>(null);
   const markers = useRef<Array<{ id: string; marker: Marker; pin: HTMLElement }>>([]);
+  const detourMarkers = useRef<Marker[]>([]);
+  const mapsApi = useRef<GoogleMaps | null>(null);
+  const [ready, setReady] = useState(false);
   const onSelectRef = useRef(onSelect);
   const activeRef = useRef(activeId);
   const [failed, setFailed] = useState(false);
@@ -72,6 +86,7 @@ export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
       await maps.importLibrary("maps");
       await maps.importLibrary("marker");
       if (disposed || !element.current) return;
+      mapsApi.current = maps;
       const first = spots[0];
       map.current = new maps.Map(element.current, {
         center: { lat: first.latitude, lng: first.longitude }, zoom: 15,
@@ -89,9 +104,20 @@ export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
       });
       highlightMarkers(markers.current, activeRef.current);
       if (spots.length > 1) map.current.fitBounds(bounds, 60);
+      setReady(true);
     }).catch(() => { if (!disposed) setFailed(true); });
-    return () => { disposed = true; for (const { marker } of markers.current) marker.map = null; markers.current = []; map.current = null; };
+    return () => { disposed = true; setReady(false); for (const { marker } of markers.current) marker.map = null; markers.current = []; map.current = null; };
   }, [key, spots]);
+
+  // 地域の寄り道は聖地の番号ピンと区別できる別のピンで重ねる。
+  useEffect(() => {
+    const maps = mapsApi.current;
+    if (!ready || !maps || !map.current) return;
+    detourMarkers.current = detours.map((spot) => new maps.marker.AdvancedMarkerElement({
+      map: map.current, position: { lat: spot.latitude, lng: spot.longitude }, title: `地域の寄り道：${spot.name}`, content: detourPinElement(spot),
+    }));
+    return () => { for (const marker of detourMarkers.current) marker.map = null; detourMarkers.current = []; };
+  }, [ready, detours]);
 
   useEffect(() => {
     highlightMarkers(markers.current, activeId);
@@ -100,5 +126,5 @@ export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
   }, [activeId, spots]);
 
   if (!key || failed) return <>{fallback}</>;
-  return <div ref={element} className="google-spot-map" role="region" aria-label="聖地の地図。番号は下の一覧と対応しています。" />;
+  return <div ref={element} className="google-spot-map" role="region" aria-label="聖地の地図。番号は下の一覧と対応しています。「食」「文」などのピンは地域の寄り道です。" />;
 }

@@ -207,7 +207,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
         ) : (
           <section className="screen-section intro-section">
             <h1><span>あの物語の場所から、</span><span><em>まちの魅力</em>へ。</span></h1>
-            <p className="lead">作品と地域を選ぶと、聖地を巡る順番と移動時間の目安が分かります。</p>
+            <p className="lead">作品と地域を選ぶと、聖地を巡る順番と移動時間の目安に加えて、聖地のあいだで寄れる地域の食や文化のお店・施設が分かります。</p>
 
             <div className="search-panel">
               <label htmlFor="work-search">作品名や地域から探す</label>
@@ -258,7 +258,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
             </section>
 
             <details className="detail-disclosure scope-disclosure"><summary>コースの作り方と注意点</summary><div className="disclosure-body">
-              <p><strong>地図・所要時間ありの地域</strong>：訪問日と使える時間を入れると、地点間の移動時間を調べて巡る順番を提案します。</p>
+              <p><strong>地図・所要時間ありの地域</strong>：訪問日と使える時間を入れると、地点間の移動時間を調べて巡る順番を提案します。聖地の間や前後で地域の食・文化にふれられる寄り道も、AI（Gemini）がGoogleマップの情報から探します。</p>
               <p><strong>それ以外の地域</strong>：掲載されている地点の候補と出典を見ながら、自分で訪問順を組み立てられます。正確な位置や営業状況は判定していません。</p>
               <p>学校・住宅地・施設の敷地には許可なく立ち入らず、出発前に公式情報とGoogleマップで確認してください。</p>
             </div></details>

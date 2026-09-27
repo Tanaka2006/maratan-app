@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MatchedWork, VerifiedDetour, VerifiedLeg, VerifiedSpot } from "../_data/anilist-types";
+import { DETOUR_CATEGORY_LABELS, openingHoursTextFor } from "../_data/local-detours";
 import { isKnownClosed, type VerifiedCourse } from "../_data/real-planner";
 import { displayVersion } from "../_data/work-genres";
 import GoogleSpotMap from "./google-spot-map";
@@ -13,6 +14,8 @@ type ItineraryResult = { course: ApiCourse; recommendation: { id: string; reason
 const MAX_SPOTS = 3;
 const MAX_DETOURS = 2;
 const LONG_WALK_METERS = 3000;
+type DetourState = { status: "idle" | "loading" | "ready" | "error"; message?: string; source?: "gemini-maps" | "places-search" | "mixed" | "none"; routable?: boolean };
+
 const DURATION_OPTIONS = [60, 90, 120, 150, 180, 210, 240, 300, 360, 420, 480, 600, 720];
 
 function embedUrl(spot: VerifiedSpot) {
@@ -41,6 +44,10 @@ function walkingRouteUrl(stops: VerifiedSpot[]) {
   const params = new URLSearchParams({ api: "1", origin: point(stops[0]), destination: point(stops[stops.length - 1]), travelmode: "walking" });
   if (stops.length > 2) params.set("waypoints", stops.slice(1, -1).map(point).join("|"));
   return `https://www.google.com/maps/dir/?${params}`;
+}
+
+function DetourBadge({ spot }: { spot: VerifiedDetour }) {
+  return <span className={`detour-badge is-${spot.category}`}>{DETOUR_CATEGORY_LABELS[spot.category]}</span>;
 }
 
 function todayInJapan() {
@@ -81,12 +88,13 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
   const [availableMinutes, setAvailableMinutes] = useState(180);
   const [stayMinutes, setStayMinutes] = useState<Record<string, number>>({});
   const [detours, setDetours] = useState<VerifiedDetour[]>([]);
-  const [detoursError, setDetoursError] = useState("");
+  const [detourState, setDetourState] = useState<DetourState>({ status: "idle" });
   const [selectedDetourIds, setSelectedDetourIds] = useState<string[]>([]);
   const [result, setResult] = useState<ItineraryResult | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const requestVersion = useRef(0);
+  const detourKey = useRef("");
   const resultRef = useRef<HTMLElement | null>(null);
   const version = displayVersion(work.version);
 
@@ -109,15 +117,32 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
     if (result) resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [result]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/detours?region=${encodeURIComponent(region)}`, { signal: controller.signal }).then(async (response) => {
+  // 地域の寄り道は、選んだ聖地の組み合わせごとに Gemini と Google マップから探す。
+  async function searchDetours(spotIds: string[]) {
+    const key = spotIds.join(",");
+    detourKey.current = key;
+    setDetourState({ status: "loading" });
+    try {
+      const response = await fetch("/api/detours", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workId: work.id, region, spotIds, visitDate }) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "寄り道候補を取得できません。");
+      if (detourKey.current !== key) return;
+      if (!response.ok) throw new Error(data.error || "寄り道候補を取得できませんでした。");
       setDetours(Array.isArray(data.detours) ? data.detours : []);
-    }).catch((error) => { if (!controller.signal.aborted) setDetoursError(error instanceof Error ? error.message : "寄り道候補を取得できません。"); });
-    return () => controller.abort();
-  }, [region]);
+      setDetourState({ status: "ready", source: data.source, routable: data.routable !== false });
+    } catch (error) {
+      if (detourKey.current !== key) return;
+      detourKey.current = "";
+      setDetourState({ status: "error", message: error instanceof Error ? error.message : "寄り道候補を取得できませんでした。" });
+    }
+  }
+
+  function resetDetours() {
+    detourKey.current = "";
+    setDetours([]);
+    setSelectedDetourIds([]);
+    setDetourState({ status: "idle" });
+  }
 
   function invalidateResult() {
     requestVersion.current++;
@@ -132,11 +157,16 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
     setCreating(true);
     setCreateError("");
     try {
+      const courseIds = [...selectedIds, ...detourIds];
+      const stays = Object.fromEntries(Object.entries(stayMinutes).filter(([id]) => courseIds.includes(id)));
       const response = await fetch("/api/itinerary", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workId: work.id, region, spotIds: selectedIds, detourIds, visitDate, availableMinutes, stayMinutes }) });
+        body: JSON.stringify({ workId: work.id, region, spotIds: selectedIds, detourIds, visitDate, availableMinutes, stayMinutes: stays }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "コースを作成できませんでした。");
-      if (current === requestVersion.current) setResult(data as ItineraryResult);
+      if (current === requestVersion.current) {
+        setResult(data as ItineraryResult);
+        if (detourKey.current !== selectedIds.join(",")) void searchDetours(selectedIds);
+      }
     } catch (error) {
       if (current === requestVersion.current) {
         setResult(null);
@@ -148,16 +178,29 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
   function toggleSpot(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id)
       : current.length < MAX_SPOTS ? [...current, id] : current);
+    resetDetours();
     invalidateResult();
   }
 
-  function toggleDetour(id: string) {
-    const next = selectedDetourIds.includes(id) ? selectedDetourIds.filter((item) => item !== id) : [...selectedDetourIds, id];
+  function applyDetours(next: string[]) {
     if (next.length > MAX_DETOURS || next.length + selectedIds.length > 5) return;
     setSelectedDetourIds(next);
     if (result) void createCourse(next);
     else invalidateResult();
   }
+
+  function toggleDetour(id: string) {
+    applyDetours(selectedDetourIds.includes(id) ? selectedDetourIds.filter((item) => item !== id) : [...selectedDetourIds, id]);
+  }
+
+  const detourById = new Map(detours.map((spot) => [spot.id, spot]));
+  const openDetours = detours.filter((spot) => !(visitDate && isKnownClosed(spot, visitDate)));
+  const detourLimit = Math.min(MAX_DETOURS, 5 - selectedIds.length);
+  // 食と文化の両方に触れられるよう、1件ずつ先に選ぶ。
+  const recommendedDetourIds = [openDetours.find((spot) => spot.category === "food"), openDetours.find((spot) => spot.category !== "food"), ...openDetours]
+    .filter((spot): spot is VerifiedDetour => Boolean(spot)).map((spot) => spot.id)
+    .filter((id, index, list) => list.indexOf(id) === index).slice(0, Math.max(0, detourLimit));
+  const canAddDetours = detourState.status === "ready" && detourState.routable !== false;
 
   const statusView = result ? {
     fits: { label: "時間内に収まる目安です", className: "is-good", detail: `指定した${formatMinutes(availableMinutes)}に対して、約${formatMinutes(availableMinutes - result.course.totalMinutes)}の余裕があります。` },
@@ -177,7 +220,7 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
       </div></div>
 
       {active ? <div className="verified-map-layout">
-        <div className="verified-map-frame"><GoogleSpotMap spots={regionSpots} activeId={active.id} onSelect={setActiveId} fallback={<><iframe title={`${active.name}の地図`} src={embedUrl(active)} loading="lazy" referrerPolicy="no-referrer" /><small>地図 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></small></>} /></div>
+        <div className="verified-map-frame"><GoogleSpotMap spots={regionSpots} detours={detours} activeId={active.id} onSelect={setActiveId} fallback={<><iframe title={`${active.name}の地図`} src={embedUrl(active)} loading="lazy" referrerPolicy="no-referrer" /><small>地図 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a></small></>} /></div>
         <ol className="verified-spot-list" aria-label="聖地の一覧">{regionSpots.map((spot, index) => {
           const checked = selectedIds.includes(spot.id);
           const disabled = !checked && selectedIds.length >= MAX_SPOTS;
@@ -201,12 +244,12 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
 
       <section className="verified-course-form" aria-labelledby="plan-form-heading">
         <h2 id="plan-form-heading">コースを作る</h2>
-        <p className="form-lead">訪問日と使える時間から、選んだ地点を巡る順番と移動時間の目安を調べます。</p>
+        <p className="form-lead">訪問日と使える時間から、選んだ地点を巡る順番と移動時間の目安を調べます。コースを作ると、聖地の間や前後で地域の食・文化にふれられる寄り道も探します。</p>
         <div className="verified-course-fields">
           <label>訪問日<input type="date" min={todayInJapan()} value={visitDate} onChange={(event) => { setVisitDate(event.target.value); invalidateResult(); }} />{visitDate ? <span className="field-hint">{formatDate(visitDate)}</span> : null}</label>
           <label>現地で使える時間<select value={availableMinutes} onChange={(event) => { setAvailableMinutes(Number(event.target.value)); invalidateResult(); }}>{DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{formatMinutes(minutes)}</option>)}</select><span className="field-hint">最初の地点に着いてから、最後の地点を出るまで</span></label>
         </div>
-        {selectedSpots.length ? <details className="detail-disclosure stay-disclosure"><summary>各地点の滞在時間を変える</summary><div className="verified-course-fields">{selectedSpots.map((spot) => <label key={spot.id}>{spot.name}<span className="input-with-unit"><input type="number" inputMode="numeric" min="5" max="180" step="5" value={Number.isFinite(stayOf(spot)) ? stayOf(spot) : ""} onChange={(event) => { setStayMinutes((current) => ({ ...current, [spot.id]: event.target.value === "" ? Number.NaN : Number(event.target.value) })); invalidateResult(); }} />分</span></label>)}</div></details> : null}
+        {selectedSpots.length ? <details className="detail-disclosure stay-disclosure"><summary>各地点の滞在時間を変える</summary><div className="verified-course-fields">{[...selectedSpots, ...selectedDetours].map((spot) => <label key={spot.id}>{spot.name}<span className="input-with-unit"><input type="number" inputMode="numeric" min="5" max="180" step="5" value={Number.isFinite(stayOf(spot)) ? stayOf(spot) : ""} onChange={(event) => { setStayMinutes((current) => ({ ...current, [spot.id]: event.target.value === "" ? Number.NaN : Number(event.target.value) })); invalidateResult(); }} />分</span></label>)}</div></details> : null}
         <button className="primary-button" type="button" disabled={!canCreate} aria-describedby={problems.length ? "plan-problems" : undefined} onClick={() => void createCourse()}>{creating ? "経路を調べています…" : "この条件でコースを作る"}</button>
         {problems.length ? <ul id="plan-problems" className="form-problems">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : null}
         {createError ? <p className="inline-error" role="alert">{createError}</p> : null}
@@ -223,17 +266,25 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           const leg = result.course.legs[index];
           const next = result.course.stops[index + 1];
           const longWalk = leg?.mode === "walking" && leg.walkingMeters !== null && leg.walkingMeters > LONG_WALK_METERS;
-          return <li key={spot.id}>
+          const detour = spot.kind === "detour" ? detourById.get(spot.id) : undefined;
+          // この区間（聖地と聖地の間）で寄りやすい、まだ選んでいない寄り道。
+          const nearbyDetours = next && canAddDetours ? openDetours.filter((item) => !selectedDetourIds.includes(item.id) && item.detour_slot?.kind === "between"
+            && ((item.detour_slot.fromId === spot.id && item.detour_slot.toId === next.id) || (item.detour_slot.fromId === next.id && item.detour_slot.toId === spot.id))).slice(0, 2) : [];
+          return <li key={spot.id} className={spot.kind === "detour" ? "is-detour" : undefined}>
             <span className="stop-number" aria-hidden="true">{index + 1}</span>
             <div className="course-stop-body">
               <strong>{spot.name}</strong>
-              <span className="stop-meta">{spot.kind === "detour" ? "地域の寄り道" : "作品の聖地"}・滞在 約{result.stayMinutes[spot.id] ?? spot.stay_minutes}分</span>
-              {spot.access_note ? <details className="detail-disclosure stop-disclosure"><summary>訪問時の注意</summary><p>{spot.access_note}</p>{spot.notes ? <p className="field-hint">{spot.notes}</p> : null}</details> : null}
+              <span className="stop-meta">{spot.kind === "detour" ? <>{detour ? <DetourBadge spot={detour} /> : null}地域の寄り道</> : "作品の聖地"}・滞在 約{result.stayMinutes[spot.id] ?? spot.stay_minutes}分</span>
+              {detour?.local_feature ? <p className="detour-feature">{detour.local_feature}</p> : null}
+              {spot.kind === "detour" ? <div className="disclosure-links">{spot.opening_hours_text ? <span className="field-hint">営業時間（Googleマップ）：{spot.opening_hours_text}</span> : null}<a href={spot.maps_uri ?? mapsUrl(spot)} target="_blank" rel="noreferrer">Googleマップで見る ↗</a></div> : null}
+              {spot.access_note ? <details className="detail-disclosure stop-disclosure"><summary>訪問時の注意</summary><p>{spot.access_note}</p>{spot.kind !== "detour" && spot.notes ? <p className="field-hint">{spot.notes}</p> : null}</details> : null}
               {leg && next ? <div className={`verified-leg${longWalk ? " is-long" : ""}`}>
                 <span><b>{leg.mode === "walking" ? "徒歩" : "電車・バス"} 約{formatMinutes(leg.minutes)}</b>{leg.walkingMeters ? `（徒歩 約${formatDistance(leg.walkingMeters)}）` : ""}{leg.fareYen ? `・運賃 約${leg.fareYen.toLocaleString()}円` : ""}</span>
                 {longWalk ? <span className="leg-warning">歩く距離が長い区間です。バスやタクシーも含めてGoogleマップで確認してください。</span> : null}
                 <a href={directionsUrl(spot, next, leg.mode)} target="_blank" rel="noreferrer">この区間の経路をGoogleマップで見る ↗</a>
                 {leg.source === "registered" ? <a href={leg.source_url} target="_blank" rel="noreferrer">移動時間の出典 ↗</a> : null}
+                {nearbyDetours.length ? <div className="leg-detours"><span>この区間で寄れる地域の食・文化</span>{nearbyDetours.map((item) =>
+                  <button type="button" key={item.id} disabled={creating || selectedDetourIds.length >= detourLimit} onClick={() => toggleDetour(item.id)}>＋ {item.name}<small>{DETOUR_CATEGORY_LABELS[item.category]}</small></button>)}</div> : null}
               </div> : null}
             </div>
           </li>;
@@ -260,24 +311,39 @@ export default function VerifiedSpotMap({ work, spots, region, onBack }: {
           <dl className="breakdown">
             <div><dt>地点間の運賃</dt><dd>{formatYen(result.costs.transitYen)}</dd></div>
             <div><dt>施設の入場料</dt><dd>{formatYen(result.costs.admissionYen)}</dd></div>
-            <div><dt>寄り道の飲食・体験</dt><dd>{hasDetourInCourse ? formatYen(result.costs.foodExperienceYen) : "寄り道なし"}</dd></div>
+            <div><dt>寄り道の飲食・体験（価格帯の下限）</dt><dd>{hasDetourInCourse ? formatYen(result.costs.foodExperienceYen) : "寄り道なし"}</dd></div>
           </dl>
           <p className="field-hint">「不明」の費用は0円として扱っていません。移動時間は{result.source === "registered" ? "登録済みの区間データ" : "Google Routesの代表時刻"}による概算です。</p>
         </div></details>
       </section> : null}
 
-      {result && (detours.length > 0 || selectedDetourIds.length > 0) ? <section className="verified-detours" aria-labelledby="detour-heading">
-        <h2 id="detour-heading">地域の寄り道を足す</h2>
-        <p>最大{MAX_DETOURS}件まで追加できます。選ぶとコースを作り直します。</p>
-        {detoursError ? <p role="status" className="inline-error">{detoursError}</p> : null}
-        <div className="verified-detour-list">{detours.map((spot) => {
+      {result ? <section className="verified-detours" aria-labelledby="detour-heading" aria-busy={detourState.status === "loading"}>
+        <p className="detour-kicker">聖地のあいだで、まちにふれる</p>
+        <h2 id="detour-heading">地域の食と文化の寄り道</h2>
+        <p>選んだ聖地の間や前後で立ち寄れる、この地域ならではの食・文化にふれられるお店や施設を、AI（Gemini）がGoogleマップの情報から探しました。最大{MAX_DETOURS}件まで追加でき、選ぶとコースを作り直します。</p>
+        {detourState.status === "loading" ? <p className="loading-note" role="status">地域の寄り道を探しています…（10秒ほどかかることがあります）</p> : null}
+        {detourState.status === "error" ? <div className="inline-error" role="alert"><p>{detourState.message}</p><button className="text-button" type="button" onClick={() => void searchDetours(selectedIds)}>もう一度探す</button></div> : null}
+        {detourState.status === "ready" && !detours.length ? <p className="field-hint" role="status">今回は聖地の近くで条件に合う寄り道を見つけられませんでした。Googleマップで周辺のお店も探してみてください。</p> : null}
+        {detourState.status === "ready" && detourState.routable === false ? <p className="field-hint">移動時間を計算する設定がないため、寄り道をコースに追加できません。候補とGoogleマップのリンクは確認できます。</p> : null}
+        {canAddDetours && recommendedDetourIds.length && !selectedDetourIds.length ? <button className="secondary-button" type="button" disabled={creating} onClick={() => applyDetours(recommendedDetourIds)}>おすすめの寄り道{recommendedDetourIds.length}件をコースに入れる</button> : null}
+        {detours.length ? <ul className="verified-detour-list">{detours.map((spot) => {
           const closed = Boolean(visitDate && isKnownClosed(spot, visitDate));
           const checked = selectedDetourIds.includes(spot.id);
-          return <div key={spot.id} className="verified-detour-item">
-            <input id={`detour-${spot.id}`} type="checkbox" checked={checked} disabled={creating || (!checked && (closed || selectedDetourIds.length >= MAX_DETOURS || selectedIds.length + selectedDetourIds.length >= 5))} onChange={() => toggleDetour(spot.id)} />
-            <span><label htmlFor={`detour-${spot.id}`}><strong>{spot.name}</strong></label><small>{spot.category}・滞在 約{spot.stay_minutes}分</small>{closed ? <small className="detour-closed">選んだ日は休業日です</small> : null}<details className="detail-disclosure"><summary>詳しく見る</summary><p>{spot.local_relevance}</p><a href={spot.source_url} target="_blank" rel="noreferrer">出典 ↗</a></details></span>
-          </div>;
-        })}</div>
+          const hours = openingHoursTextFor(spot.weekday_hours, visitDate);
+          return <li key={spot.id} className={`verified-detour-item${checked ? " is-selected" : ""}`}>
+            <input id={`detour-${spot.id}`} type="checkbox" checked={checked} disabled={!canAddDetours || creating || (!checked && (closed || selectedDetourIds.length >= detourLimit))} onChange={() => toggleDetour(spot.id)} />
+            <span>
+              <label htmlFor={`detour-${spot.id}`}><DetourBadge spot={spot} /><strong>{spot.name}</strong></label>
+              {spot.local_feature ? <span className="detour-feature">{spot.local_feature}</span> : null}
+              {spot.detour_reason ? <span className="detour-reason">{spot.detour_reason}</span> : null}
+              <small>{spot.slot_label ? `${spot.slot_label}・` : ""}滞在 約{spot.stay_minutes}分</small>
+              {closed ? <small className="detour-closed">Googleマップでは、選んだ日の曜日は営業時間がありません</small> : null}
+              {hours ? <small>営業時間（Googleマップ）：{hours}</small> : null}
+              <span className="detour-links"><a href={spot.maps_uri ?? mapsUrl(spot)} target="_blank" rel="noreferrer">Googleマップで見る ↗</a>{spot.official_url ? <a href={spot.official_url} target="_blank" rel="noreferrer">公式サイト ↗</a> : null}</span>
+            </span>
+          </li>;
+        })}</ul> : null}
+        {detours.length ? <p className="field-hint detour-attribution">紹介文はAIがGoogleマップの情報をもとに作成したもので、作品との関係を示すものではありません。店舗情報の出典：Google マップ。営業時間・定休日・価格は変わることがあるため、訪問前に公式情報で確認してください。</p> : null}
       </section> : null}
     </section>
   );
