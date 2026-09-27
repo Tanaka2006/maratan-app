@@ -155,12 +155,6 @@ main { flex: 1; }
 .verified-spot-list { align-content: start; display: grid; gap: 10px; list-style: none; margin: 0; max-height: 482px; overflow: auto; padding: 0; }
 .verified-spot-list li { border: 1px solid var(--line); border-radius: 13px; padding: 10px 14px; }
 .verified-spot-list li.is-active { background: var(--orange-wash); border-color: var(--orange-soft); }
-.spot-heading { align-items: center; background: none; border: 0; cursor: pointer; display: flex; gap: 10px; min-height: 44px; padding: 2px 0; text-align: left; width: 100%; }
-.spot-heading strong { font-size: 16px; }
-.spot-relation { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 2px 0 6px; }
-.verified-select { align-items: center; cursor: pointer; display: inline-flex; font-size: 15px; font-weight: 700; gap: 9px; min-height: 40px; }
-.verified-select input { accent-color: var(--orange); height: 20px; width: 20px; }
-.verified-select.is-disabled { color: #9a918b; cursor: not-allowed; }
 .spot-disclosure { border-top: 1px solid var(--line); margin-top: 6px; }
 
 .verified-course-form, .verified-course-result, .verified-detours { border: 1px solid var(--line); border-radius: 18px; margin-top: 28px; padding: 26px; }
@@ -211,28 +205,13 @@ main { flex: 1; }
 .breakdown-total dd { color: var(--orange-deep); }
 
 .verified-detours > p { color: var(--muted); font-size: 14px; }
-.verified-detour-list { display: grid; gap: 10px; }
-.verified-detour-item { align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 12px; padding: 12px 14px; }
-.verified-detour-item input { accent-color: var(--orange); height: 20px; margin-top: 2px; width: 20px; }
-.verified-detour-item > span { display: grid; gap: 2px; }
-.verified-detour-item label { cursor: pointer; }
-.verified-detour-item strong { font-size: 15px; }
-.verified-detour-item small { color: var(--muted); font-size: 13px; }
-.verified-detour-item a { color: var(--orange-deep); font-size: 13px; }
 .detour-closed { color: var(--red) !important; font-weight: 700; }
 .verified-detours { background: var(--green-soft); border-color: #bfdccf; }
 .verified-detours .secondary-button { margin: 4px 0 14px; }
 .detour-kicker { color: var(--green) !important; font-size: 13px !important; font-weight: 800; letter-spacing: .04em; margin: 0 0 2px; }
-ul.verified-detour-list { list-style: none; margin: 0; padding: 0; }
-.verified-detour-item { background: #fff; }
-.verified-detour-item.is-selected { border-color: var(--green); box-shadow: 0 0 0 2px rgba(42,113,87,.15); }
-.verified-detour-item label { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .detour-badge { background: var(--orange-pale); border-radius: 999px; color: var(--orange-deep); display: inline-flex; font-size: 12px; font-weight: 800; line-height: 1.4; margin-right: 6px; padding: 2px 9px; white-space: nowrap; }
 .detour-badge.is-culture, .detour-badge.is-experience { background: var(--green-soft); color: var(--green); }
 .detour-feature { color: var(--ink); font-size: 14px; font-weight: 700; line-height: 1.6; margin: 2px 0 0; }
-.detour-reason { color: #4f4640; font-size: 14px; line-height: 1.7; }
-.detour-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 2px; }
-.detour-attribution { margin-top: 14px; }
 .course-stops > li.is-detour .stop-number { background: var(--green); }
 .course-stops > li.is-detour .course-stop-body > strong { color: var(--green); }
 .leg-detours { border-top: 1px dashed var(--line-strong); display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 4px; padding-top: 8px; }
@@ -250,17 +229,7 @@ ul.verified-detour-list { list-style: none; margin: 0; padding: 0; }
 .research-course-layout { align-items: start; display: grid; gap: 28px; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); }
 .research-course-layout h2 { font-size: 21px; margin: 0 0 14px; }
 .research-course-layout h2 small { color: var(--muted); font-size: 14px; font-weight: 600; margin-left: 4px; }
-.research-course-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.research-course-spot { border: 1px solid var(--line); border-radius: 13px; padding: 14px 16px; }
-.research-course-spot.is-selected { background: var(--orange-wash); border-color: var(--orange-soft); }
-.research-course-spot.is-disabled { opacity: .6; }
-.research-course-spot label { align-items: flex-start; cursor: pointer; display: flex; gap: 10px; }
-.research-course-spot input { accent-color: var(--orange); flex: 0 0 auto; height: 20px; margin-top: 2px; width: 20px; }
-.research-course-spot label span { display: grid; gap: 3px; }
-.research-course-spot strong { font-size: 15px; }
-.research-course-spot small { color: #8d4a22; font-size: 13px; line-height: 1.6; }
-.research-course-spot .spot-links { margin-left: 30px; }
-.research-course-result { background: var(--orange-wash); border: 1px solid #f4dece; border-radius: 16px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 20px; position: sticky; top: 84px; }
+.research-course-result { background: var(--orange-wash); border: 1px solid #f4dece; border-radius: 16px; padding: 20px; }
 .research-course-result ol { list-style: none; margin: 0 0 16px; padding: 0; }
 .research-course-result li + li { margin-top: 4px; }
 .plan-stop { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 10px; padding: 10px 12px; }
@@ -305,7 +274,7 @@ footer small { color: #cfc6c0; font-size: 12px; }
   .search-panel { display: block; padding: 16px; }
   .search-panel > label { display: block; margin-bottom: 10px; }
   .research-section { margin-top: 36px; }
-  .research-grid, .research-course-grid { grid-template-columns: 1fr; }
+  .research-grid { grid-template-columns: 1fr; }
   .list-heading h2 { font-size: 21px; }
   .section-heading h1 { font-size: 30px; }
   .section-heading p { font-size: 14px; }
@@ -315,17 +284,91 @@ footer small { color: #cfc6c0; font-size: 12px; }
   .verified-course-form, .verified-course-result, .verified-detours { padding: 18px 16px; }
   .verified-course-fields label { min-width: 0; width: 100%; }
   .verified-course-form .primary-button { width: 100%; }
-  .research-course-spot .spot-links { margin-left: 0; }
   footer { align-items: flex-start; flex-direction: column; gap: 8px; padding: 22px 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 
-.status-tag { background: var(--yellow-soft); border: 1px solid #ead49e; border-radius: 999px; color: #6d5316; display: inline-block; font-size: 13px; margin-left: 8px; padding: 1px 9px; vertical-align: 2px; white-space: nowrap; }
-@media (max-width: 900px) {
-  /* スマホでは地点一覧より先に訪問順の案を見せる */
-  .research-course-layout > .research-course-result { order: -1; }
-}
 @media (max-width: 620px) {
   .genre-filters button { padding: 6px 15px; }
+}
+
+/* ===== 見やすさの調整：初期表示は要点だけ、詳細は開いて見る ===== */
+.work-version .work-type { font-size: 13px; }
+.research-card h3 { margin-top: 0; }
+.research-card .region-buttons { margin-top: 12px; }
+
+.step-heading, .choose-heading { align-items: baseline; display: flex; gap: 10px; justify-content: space-between; margin: 24px 0 12px; }
+.step-heading h2, .choose-heading h2 { font-size: 21px; margin: 0; }
+.choose-count { background: var(--orange-pale); border-radius: 999px; color: var(--orange-deep); font-size: 13px; font-weight: 800; padding: 2px 10px; white-space: nowrap; }
+.verified-course-form h2, .verified-course-result h2, .verified-detours h2 { font-size: 21px; }
+.verified-detours > p { margin: 6px 0 12px; }
+
+/* 聖地の選択（地図つき） */
+.verified-spot-list li { padding: 8px 12px; }
+.verified-spot-list li.is-selected { border-color: var(--orange-soft); }
+.verified-spot-list li.is-disabled .spot-select { color: var(--muted); }
+.spot-select { align-items: flex-start; cursor: pointer; display: flex; gap: 10px; min-height: 44px; padding: 4px 0; }
+.spot-select input { accent-color: var(--orange); flex: 0 0 auto; height: 22px; margin-top: 3px; width: 22px; }
+.spot-select-text { display: grid; gap: 2px; min-width: 0; }
+.spot-select-text strong { font-size: 16px; line-height: 1.5; }
+.spot-select-text small { color: var(--muted); display: -webkit-box; font-size: 13px; line-height: 1.6; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.spot-disclosure { border-top: 0; margin: 0 0 0 32px; }
+.spot-disclosure summary, .spot-more summary, .detour-more summary, .stop-disclosure summary { font-size: 13px; min-height: 32px; padding: 4px 0; }
+
+/* 聖地の選択（調査リスト） */
+.choose-list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.choose-item { align-items: center; border: 1px solid var(--line); border-radius: 12px; display: flex; flex-wrap: wrap; gap: 0 8px; padding: 4px 12px; }
+.choose-item.is-selected { background: var(--orange-wash); border-color: var(--orange-soft); }
+.choose-item.is-disabled > label { color: var(--muted); }
+.choose-item > label { flex: 1 1 0; min-width: 0; align-items: center; cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px 10px; min-height: 44px; }
+.choose-item input { accent-color: var(--orange); flex: 0 0 auto; height: 22px; width: 22px; }
+.choose-item strong { font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.spot-tag { background: #f4efea; border-radius: 6px; color: var(--muted); font-size: 11px; font-weight: 700; padding: 1px 7px; }
+.spot-more { flex: 0 0 auto; }
+.spot-more[open] { flex-basis: 100%; padding-left: 32px; }
+.spot-more[open] summary { margin-left: auto; }
+.plan-leg { font-size: 13px; margin: 2px 0 2px 38px; padding: 4px 0; }
+
+/* コース結果 */
+.status-card { text-align: left; }
+.status-total { color: var(--ink); font-size: 15px !important; margin: 0 0 2px !important; }
+.status-total b { font-size: 28px !important; margin: 0 2px; }
+.status-card strong { font-size: 17px; }
+.status-card > p:last-child { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.stop-meta { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.stop-meta a { color: var(--orange-deep); font-size: 13px; font-weight: 700; }
+.stop-meta .detour-badge { margin-right: 0; }
+.verified-leg { gap: 4px; padding: 10px 12px; }
+.leg-line { align-items: center; display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; }
+.leg-line a { white-space: nowrap; }
+.leg-source { font-size: 12px; }
+.leg-detours { margin-top: 2px; padding-top: 6px; }
+.leg-detours > span { flex-basis: auto; margin-right: 2px; }
+.check-list { color: #4f4640; font-size: 14px; line-height: 1.8; margin: 0; padding-left: 20px; }
+.result-disclosure + .result-disclosure { margin-top: 0; }
+
+/* 寄り道カード */
+.detour-list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.detour-card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 2px; }
+.detour-card.is-selected { border-color: var(--green); box-shadow: 0 0 0 2px rgba(42,113,87,.15); }
+.detour-card.is-closed .detour-card-main { opacity: .7; }
+.detour-card-main { cursor: pointer; display: flex; gap: 10px; }
+.detour-card-main input { accent-color: var(--green); flex: 0 0 auto; height: 22px; margin-top: 2px; width: 22px; }
+.detour-card-text { display: grid; gap: 2px; min-width: 0; }
+.detour-card-title { align-items: center; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.detour-card-title strong { font-size: 15px; overflow-wrap: anywhere; }
+.detour-card-text small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.detour-card .detour-badge { margin-right: 0; }
+.detour-more { margin-left: 32px; }
+.detour-note { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
+.detour-search { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; }
+.detour-search label { color: var(--ink); display: grid; flex: 1 1 150px; font-size: 13px; font-weight: 700; gap: 4px; }
+.detour-search input { background: #fff; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); font-size: 16px; height: 44px; padding: 0 10px; }
+.research-detours .detour-search .secondary-button { flex: 1 1 140px; margin: 0; min-height: 44px; width: auto; }
+.research-detours .field-hint { margin-top: 8px; }
+
+@media (max-width: 620px) {
+  .verified-map-frame iframe, .google-spot-map { height: 240px; }
+  .status-total b { font-size: 26px !important; }
 }

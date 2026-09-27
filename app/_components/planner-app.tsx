@@ -207,7 +207,7 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
         ) : (
           <section className="screen-section intro-section">
             <h1><span>あの物語の場所から、</span><span><em>まちの魅力</em>へ。</span></h1>
-            <p className="lead">作品と地域を選ぶと、聖地を巡る順番と移動時間の目安に加えて、聖地のあいだで寄れる地域の食や文化のお店・施設が分かります。</p>
+            <p className="lead">作品を選ぶだけで、聖地めぐりと、途中で寄れる地元の味・文化スポットをつないだコースを作れます。</p>
 
             <div className="search-panel">
               <label htmlFor="work-search">作品名や地域から探す</label>
@@ -222,26 +222,24 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
                 <h2 id="work-list-heading">{filtering ? "検索結果" : "作品一覧"}</h2>
                 <span className="result-count" role="status">{filtering ? `${matchingWorks.length}作品` : `全${researchCatalog.works.length}作品`}</span>
               </div>
-              {researchCatalog.error ? <p className="catalog-notice" role="status">最新の作品情報を取得できなかったため、保存済みの一覧を表示しています。</p> : null}
-              {publishedStatus === "error" ? <p className="catalog-notice" role="status">地図対応の作品を確認できませんでした。一覧からは地点の候補を見られます。</p> : null}
+              {publishedStatus === "error" ? <p className="catalog-notice" role="status">現在、移動時間の計算に対応した作品を読み込めません。聖地の一覧と寄り道探しは使えます。</p> : null}
               {openError ? <p className="inline-error" role="alert">{openError}</p> : null}
-              {matchingWorks.length ? <p className="list-legend"><span className="ready-badge">地図・所要時間あり</span>が付いた地域では、移動時間の目安付きでコースを作れます。</p> : null}
+              {matchingWorks.some((work) => publishedById.has(work.id)) ? <p className="list-legend"><span className="ready-badge">所要時間つき</span>の地域は、移動時間の目安まで計算できます。</p> : null}
 
               {visibleWorks.length ? <div className="research-grid">{visibleWorks.map((work) => {
                 const published = publishedById.get(work.id);
                 const version = displayVersion(work.version);
                 return <article className={`research-card${published ? " is-ready" : ""}`} key={work.id}>
-                  <span className="work-type">{workTypeLabel(work)}</span>
                   <h3>{work.title}</h3>
-                  {version ? <p className="work-version">{version}</p> : null}
+                  <p className="work-version"><span className="work-type">{workTypeLabel(work)}</span>{version ? `・${version}` : ""}</p>
                   <div className="region-buttons">{work.regions.map((region) => {
                     const ready = Boolean(published?.regions.includes(region));
                     const count = ready ? published?.spotCounts?.[region] : work.region_counts[region];
                     const key = `${work.id}/${region}`;
                     const opening = openingKey === key;
-                    return <button type="button" key={region} className={ready ? "is-ready" : ""} disabled={Boolean(openingKey)} onClick={() => openWork(work.id, region)} aria-label={`${work.title}・${region}の${ready ? "聖地マップ" : "地点"}を見る`}>
+                    return <button type="button" key={region} className={ready ? "is-ready" : ""} disabled={Boolean(openingKey)} onClick={() => openWork(work.id, region)} aria-label={`${work.title}・${region}のコースを作る`}>
                       <span className="region-name"><PinIcon />{region}</span>
-                      <span className="region-meta">{opening ? "読み込み中…" : <>{ready ? <span className="ready-badge">地図・所要時間あり</span> : null}{count ? `${count}地点` : null}<span aria-hidden="true" className="region-arrow">→</span></>}</span>
+                      <span className="region-meta">{opening ? "読み込み中…" : <>{ready ? <span className="ready-badge">所要時間つき</span> : null}{count ? `${count}地点` : null}<span aria-hidden="true" className="region-arrow">→</span></>}</span>
                     </button>;
                   })}</div>
                 </article>;
@@ -258,8 +256,8 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
             </section>
 
             <details className="detail-disclosure scope-disclosure"><summary>コースの作り方と注意点</summary><div className="disclosure-body">
-              <p><strong>地図・所要時間ありの地域</strong>：訪問日と使える時間を入れると、地点間の移動時間を調べて巡る順番を提案します。聖地の間や前後で地域の食・文化にふれられる寄り道も、AI（Gemini）がGoogleマップの情報から探します。</p>
-              <p><strong>それ以外の地域</strong>：掲載されている地点の候補と出典を見ながら、自分で訪問順を組み立てられます。正確な位置や営業状況は判定していません。</p>
+              <p>作品と地域を選び、巡りたい聖地を最大3件選ぶと、訪問順の案を作ります。聖地の間や前後で寄れる地元の味・文化スポットは、AI（Gemini）がGoogleマップの情報から探します。</p>
+              <p><strong>所要時間つきの地域</strong>では、訪問日と使える時間から移動時間の目安も計算します。それ以外の地域では、各区間の移動をGoogleマップで確認してください。</p>
               <p>学校・住宅地・施設の敷地には許可なく立ち入らず、出発前に公式情報とGoogleマップで確認してください。</p>
             </div></details>
           </section>

@@ -81,8 +81,7 @@ export default function AniListLookup({ query, onOpenMap }: {
 
   return (
     <section className="anilist-panel" aria-label="アニメ作品の対応状況">
-      <div className="anilist-heading"><strong>アニメ作品の対応状況を確認</strong><a href="https://anilist.co/" target="_blank" rel="noreferrer">候補提供：AniList ↗</a></div>
-      <p className="anilist-status">一覧にないアニメでも、作品を選ぶと聖地を掲載しているか確認できます。</p>
+      <div className="anilist-heading"><strong>ほかのアニメから探す</strong><a href="https://anilist.co/" target="_blank" rel="noreferrer">候補提供：AniList ↗</a></div>
       {searchPhase === "loading" ? <p className="anilist-status" role="status">アニメを検索しています…</p> : null}
       {searchPhase === "error" ? <p className="anilist-status error" role="alert">{searchError}</p> : null}
       {searchPhase === "ready" && suggestions.length === 0 ? <p className="anilist-status">アニメの候補も見つかりませんでした。ひらがなや英語の表記でもお試しください。</p> : null}
