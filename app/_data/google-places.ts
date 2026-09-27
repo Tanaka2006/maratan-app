@@ -14,7 +14,7 @@ import {
 const PLACES_ENDPOINT = "https://places.googleapis.com/v1";
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_DETOUR_RESULTS = 6;
-const DETAILS_FIELDS = "id,displayName,location,googleMapsUri,businessStatus,primaryType,types,regularOpeningHours,priceRange,websiteUri";
+const DETAILS_FIELDS = "id,displayName,location,googleMapsUri,businessStatus,primaryType,types,regularOpeningHours,priceRange,websiteUri,reviewSummary";
 const PLACE_ACCESS_NOTE = "Googleマップの情報をもとにした寄り道候補です。当日の営業時間・定休日・混雑は店舗や施設の公式情報で確認してください。";
 
 export function placesApiKey() {
@@ -31,6 +31,7 @@ type PlaceDetails = {
   types?: string[];
   regularOpeningHours?: { periods?: PlacePeriod[]; weekdayDescriptions?: string[] };
   priceRange?: { startPrice?: { currencyCode?: string; units?: string } };
+  reviewSummary?: { text?: { text?: string }; disclosureText?: { text?: string }; flagContentUri?: string; reviewsUri?: string };
   websiteUri?: string;
 };
 
@@ -38,6 +39,19 @@ type DetourText = { localFeature: string | null; reason: string | null; source: 
 
 function weekdayHours(value: unknown) {
   return Array.isArray(value) && value.length === 7 && value.every((line) => typeof line === "string" && line.length <= 200) ? value as string[] : null;
+}
+
+/**
+ * Google 公式の「AIによるクチコミ要約」。表示に必須の「Geminiで要約」の表記・報告リンク・クチコミへのリンクが
+ * そろっているときだけ使う（そろわなければ表示しない）。
+ */
+function reviewSummaryOf(summary: PlaceDetails["reviewSummary"]) {
+  const text = summary?.text?.text?.trim();
+  const disclosure = summary?.disclosureText?.text?.trim();
+  const flagUri = httpsUrl(summary?.flagContentUri);
+  const reviewsUri = httpsUrl(summary?.reviewsUri);
+  if (!text || !disclosure || !flagUri || !reviewsUri || text.length > 600) return null;
+  return { text, disclosure, flagUri, reviewsUri };
 }
 
 function httpsUrl(value: unknown) {
@@ -71,6 +85,7 @@ export function detourFromPlace(place: PlaceDetails, region: string, visitDate: 
     weekday_hours: weekdayHours(place.regularOpeningHours?.weekdayDescriptions),
     last_admission: null, reservation_status: "unknown",
     reference_price_yen: start?.currencyCode === "JPY" && Number.isFinite(Number(start.units)) ? Number(start.units) : null,
+    review_summary: reviewSummaryOf(place.reviewSummary),
   };
 }
 
@@ -126,7 +141,7 @@ ${list}
 }
 
 /** Gemini + Google マップ グラウンディングで寄り道の候補を取得する。根拠のない候補は捨てる。 */
-async function geminiMapsCandidates(spots: readonly DetourAnchor[], region: string, geminiKey: string) {
+async function geminiMapsCandidates(spots: readonly DetourAnchor[], region: string, geminiKey: string, getDetails: (placeId: string) => Promise<PlaceDetails | null>) {
   const center = centroid(spots);
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: DETOUR_INSTRUCTION }] },
@@ -156,7 +171,12 @@ async function geminiMapsCandidates(spots: readonly DetourAnchor[], region: stri
     return placeId && uri && title ? [{ placeId, uri, title }] : [];
   });
   if (!text || !grounded.length) return [];
-  return matchGroundedPicks(extractJson(text), grounded);
+  // グラウンディングの名前はローマ字のことがあるため、Places API の日本語名でも照合する。
+  const withAliases = await Promise.all(grounded.slice(0, 10).map(async (place) => {
+    const name = (await getDetails(place.placeId))?.displayName?.text?.trim();
+    return name ? { ...place, aliases: [name] } : place;
+  }));
+  return matchGroundedPicks(extractJson(text), withAliases);
 }
 
 const SEARCH_QUERIES = [
@@ -233,10 +253,16 @@ export async function searchLocalDetours(spots: DetourAnchor[], region: string, 
   const seichiNames = new Set(spots.map((spot) => normalizeName(spot.name)));
   const accepted = new Map<string, VerifiedDetour>();
   const sources = new Set<"gemini-maps" | "places-search">();
+  // 同じ場所の詳細を何度も取りに行かない（グラウンディングの照合と確認で共用）。
+  const detailsCache = new Map<string, Promise<PlaceDetails | null>>();
+  const getDetails = (placeId: string) => {
+    if (!detailsCache.has(placeId)) detailsCache.set(placeId, fetchPlaceDetails(placeId, placesKey));
+    return detailsCache.get(placeId)!;
+  };
 
   async function accept(placeId: string, text: DetourText) {
     if (accepted.has(placeId)) return;
-    const details = await fetchPlaceDetails(placeId, placesKey);
+    const details = await getDetails(placeId);
     const detour = details ? detourFromPlace(details, region, visitDate, text) : null;
     if (!detour || accepted.has(detour.id) || seichiNames.has(normalizeName(detour.name))) return;
     if (!isWithinReach(detour, spots) || spots.some((spot) => metersBetween(spot, detour) < 30)) return;
@@ -248,7 +274,7 @@ export async function searchLocalDetours(spots: DetourAnchor[], region: string, 
 
   if (geminiKey) {
     try {
-      const picks = await geminiMapsCandidates(spots, region, geminiKey);
+      const picks = await geminiMapsCandidates(spots, region, geminiKey, getDetails);
       await Promise.all(picks.slice(0, 8).map((pick) => accept(pick.placeId, { localFeature: pick.localFeature, reason: pick.reason, source: "gemini-maps" })));
     } catch { /* 予備の検索に進む */ }
   }

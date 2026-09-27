@@ -153,3 +153,14 @@ test("区間の移動手段を「徒歩」「バス」「電車」に分けて�
   assert.equal(showAlternative({ ...walk, minutes: 6 }, bus), false, "短い徒歩ならバスは出さない");
   assert.equal(showAlternative({ ...walk, minutes: 20 }, bus), true);
 });
+
+test("グラウンディングの名前がローマ字でも、Places の日本語名で照合できる", async () => {
+  const { matchGroundedPicks, cleanGroundedTitle } = await import("../app/_data/local-detours.ts");
+  assert.equal(cleanGroundedTitle("Ajidokoro Furukawa - Google Maps"), "Ajidokoro Furukawa");
+  const grounded = [{ placeId: "ChIJaaaaaaaaaaaaaaaa", title: "Ajidokoro Furukawa - Google Maps", uri: "https://maps.google.com/?cid=1", aliases: ["味処 古川"] }];
+  const picks = matchGroundedPicks([{ name: "味処古川", localFeature: "飛騨の郷土料理", reason: "駅から近い" }, { name: "架空の店", localFeature: "郷土料理", reason: "x" }], grounded);
+  assert.deepEqual(picks.map((pick) => [pick.placeId, pick.name]), [["ChIJaaaaaaaaaaaaaaaa", "味処 古川"]]);
+  // 日本語名がなくても、末尾の「 - Google Maps」を外して照合する
+  const english = matchGroundedPicks([{ name: "Ajidokoro Furukawa", localFeature: "飛騨の郷土料理", reason: "駅から近い" }], [{ ...grounded[0], aliases: undefined }]);
+  assert.equal(english.length, 1);
+});

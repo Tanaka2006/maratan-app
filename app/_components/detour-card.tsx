@@ -43,6 +43,10 @@ export default function DetourCard({ spot, checked, disabled, closed, visitDate,
         {closed ? <small className="detour-closed">選んだ日は定休日の可能性があります</small> : null}
       </span>
     </label>
+    {spot.review_summary ? <div className="review-summary">
+      <p>{spot.review_summary.text}</p>
+      <small>{spot.review_summary.disclosure}・<a href={spot.review_summary.reviewsUri} target="_blank" rel="noreferrer">クチコミを見る ↗</a>・<a href={spot.review_summary.flagUri} target="_blank" rel="noreferrer">報告</a></small>
+    </div> : null}
     <details className="detail-disclosure detour-more">
       <summary>詳しく見る</summary>
       <div className="disclosure-body">

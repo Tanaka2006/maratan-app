@@ -50,6 +50,8 @@ export type VerifiedSpot = {
   detour_slot?: { kind: "between"; fromId: string; toId: string } | { kind: "near"; spotId: string } | null;
   opening_hours_text?: string | null;
   weekday_hours?: string[] | null;
+  // Places API (New) の「AIによるクチコミ要約」。保存せず、取得のたびにそのまま表示する。
+  review_summary?: { text: string; disclosure: string; flagUri: string; reviewsUri: string } | null;
   detour_source?: "gemini-maps" | "places-search";
 };
 

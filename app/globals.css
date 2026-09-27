@@ -389,3 +389,7 @@ footer small { color: #cfc6c0; font-size: 12px; }
 .leg-mode.is-train b::before { content: "🚃 "; }
 .leg-mode.is-mixed b::before { content: "🚃🚌 "; }
 .leg-mode.is-walk b::before { content: "🚶 "; }
+.review-summary { background: #fafaf7; border-left: 3px solid #bfdccf; border-radius: 6px; margin: 6px 0 0 32px; padding: 6px 10px; }
+.review-summary p { color: #4f4640; display: -webkit-box; font-size: 13px; line-height: 1.7; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.review-summary small { color: var(--muted); display: block; font-size: 11px; margin-top: 2px; }
+.review-summary a { color: var(--orange-deep); font-weight: 700; }
