@@ -47,10 +47,12 @@ await check("Supabase（作品・聖地DB）", ["NEXT_PUBLIC_SUPABASE_URL", "NEX
 await check("Places API (New)（寄り道の確認・地点の位置）", placesKey ? [] : ["GOOGLE_PLACES_API_KEY"], async () => {
   const data = await json(await fetch("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": placesKey, "X-Goog-FieldMask": "places.id,places.displayName" },
-    body: JSON.stringify({ textQuery: "岐阜県 飛騨市 郷土料理", languageCode: "ja", regionCode: "JP", maxResultCount: 3 }),
+    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": placesKey, "X-Goog-FieldMask": "places.id,places.displayName,places.reviewSummary" },
+    body: JSON.stringify({ textQuery: "岐阜県 飛騨市 郷土料理", languageCode: "ja", regionCode: "JP", maxResultCount: 5 }),
   }));
-  return `「飛騨市 郷土料理」で ${data.places?.length ?? 0} 件（例：${data.places?.[0]?.displayName?.text ?? "なし"}）`;
+  const places = data.places ?? [];
+  const summarized = places.filter((place) => place.reviewSummary?.text?.text);
+  return `「飛騨市 郷土料理」で ${places.length} 件（例：${places[0]?.displayName?.text ?? "なし"}）／AIクチコミ要約あり ${summarized.length} 件${summarized[0] ? `（例：${summarized[0].displayName?.text}「${summarized[0].reviewSummary.text.text.slice(0, 30)}…」）` : ""}`;
 });
 
 await check("Routes API（地点間の移動時間）", ["GOOGLE_ROUTES_API_KEY"], async () => {

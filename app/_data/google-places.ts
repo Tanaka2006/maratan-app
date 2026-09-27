@@ -14,7 +14,7 @@ import {
 const PLACES_ENDPOINT = "https://places.googleapis.com/v1";
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_DETOUR_RESULTS = 6;
-const DETAILS_FIELDS = "id,displayName,location,googleMapsUri,businessStatus,primaryType,types,regularOpeningHours,priceRange,websiteUri";
+const DETAILS_FIELDS = "id,displayName,location,googleMapsUri,businessStatus,primaryType,types,regularOpeningHours,priceRange,websiteUri,reviewSummary";
 const PLACE_ACCESS_NOTE = "Googleマップの情報をもとにした寄り道候補です。当日の営業時間・定休日・混雑は店舗や施設の公式情報で確認してください。";
 
 export function placesApiKey() {
@@ -31,6 +31,7 @@ type PlaceDetails = {
   types?: string[];
   regularOpeningHours?: { periods?: PlacePeriod[]; weekdayDescriptions?: string[] };
   priceRange?: { startPrice?: { currencyCode?: string; units?: string } };
+  reviewSummary?: { text?: { text?: string }; disclosureText?: { text?: string }; flagContentUri?: string; reviewsUri?: string };
   websiteUri?: string;
 };
 
@@ -38,6 +39,19 @@ type DetourText = { localFeature: string | null; reason: string | null; source: 
 
 function weekdayHours(value: unknown) {
   return Array.isArray(value) && value.length === 7 && value.every((line) => typeof line === "string" && line.length <= 200) ? value as string[] : null;
+}
+
+/**
+ * Google 公式の「AIによるクチコミ要約」。表示に必須の「Geminiで要約」の表記・報告リンク・クチコミへのリンクが
+ * そろっているときだけ使う（そろわなければ表示しない）。
+ */
+function reviewSummaryOf(summary: PlaceDetails["reviewSummary"]) {
+  const text = summary?.text?.text?.trim();
+  const disclosure = summary?.disclosureText?.text?.trim();
+  const flagUri = httpsUrl(summary?.flagContentUri);
+  const reviewsUri = httpsUrl(summary?.reviewsUri);
+  if (!text || !disclosure || !flagUri || !reviewsUri || text.length > 600) return null;
+  return { text, disclosure, flagUri, reviewsUri };
 }
 
 function httpsUrl(value: unknown) {
@@ -71,6 +85,7 @@ export function detourFromPlace(place: PlaceDetails, region: string, visitDate: 
     weekday_hours: weekdayHours(place.regularOpeningHours?.weekdayDescriptions),
     last_admission: null, reservation_status: "unknown",
     reference_price_yen: start?.currencyCode === "JPY" && Number.isFinite(Number(start.units)) ? Number(start.units) : null,
+    review_summary: reviewSummaryOf(place.reviewSummary),
   };
 }
 
