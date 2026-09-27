@@ -1,4 +1,7 @@
-import type { VerifiedDetour, VerifiedSpot } from "./anilist-types";
+import type { VerifiedDetour } from "./anilist-types";
+
+/** 寄り道探しの基準にする聖地。DBの確認済み聖地、または調査リストの地点を位置検索したもの。 */
+export type DetourAnchor = { id: string; name: string; latitude: number; longitude: number };
 import {
   categoryFromTypes, closedWeekdaysFromPeriods, DEFAULT_DETOUR_STAY, extractJson, isWithinReach, matchGroundedPicks,
   metersBetween, normalizeName, normalizePlaceId, openingHoursTextFor, safeDetourText, safeMapsUri, slotLabel, suggestSlot,
@@ -85,15 +88,16 @@ export async function fetchPlaceDetails(placeId: string, key: string): Promise<P
   } catch { return null; }
 }
 
-function centroid(spots: readonly VerifiedSpot[]) {
+function centroid(spots: readonly DetourAnchor[]) {
   return {
     latitude: spots.reduce((sum, spot) => sum + spot.latitude, 0) / spots.length,
     longitude: spots.reduce((sum, spot) => sum + spot.longitude, 0) / spots.length,
   };
 }
 
-function geminiModel() {
-  return process.env.GEMINI_DETOUR_MODEL || "gemini-3.5-flash";
+/** Googleマップ グラウンディングに使うモデル。指定モデルが使えない場合に備え、順に試す。 */
+export function geminiDetourModels() {
+  return [...new Set([process.env.GEMINI_DETOUR_MODEL, "gemini-3.5-flash", "gemini-2.5-flash"].filter((model): model is string => Boolean(model)))];
 }
 
 const DETOUR_INSTRUCTION = [
@@ -103,7 +107,7 @@ const DETOUR_INSTRUCTION = [
   "出力は指定された JSON 配列だけにしてください。",
 ].join("\n");
 
-function detourPrompt(spots: readonly VerifiedSpot[], region: string) {
+function detourPrompt(spots: readonly DetourAnchor[], region: string) {
   const list = spots.map((spot, index) => `${index + 1}. ${spot.name}（緯度${spot.latitude.toFixed(5)}, 経度${spot.longitude.toFixed(5)}）`).join("\n");
   return `${region}で次の聖地を巡る人が、聖地と聖地の間や、最初の聖地の前・最後の聖地の後に立ち寄れる場所を Google マップで探してください。
 目的は、聖地巡礼だけで終わらず、この地域ならではの食や文化に触れてもらうことです。
@@ -122,19 +126,24 @@ ${list}
 }
 
 /** Gemini + Google マップ グラウンディングで寄り道の候補を取得する。根拠のない候補は捨てる。 */
-async function geminiMapsCandidates(spots: readonly VerifiedSpot[], region: string, geminiKey: string) {
+async function geminiMapsCandidates(spots: readonly DetourAnchor[], region: string, geminiKey: string) {
   const center = centroid(spots);
-  const response = await fetch(`${GEMINI_ENDPOINT}/models/${encodeURIComponent(geminiModel())}:generateContent`, {
-    method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: DETOUR_INSTRUCTION }] },
-      contents: [{ role: "user", parts: [{ text: detourPrompt(spots, region) }] }],
-      tools: [{ googleMaps: {} }],
-      toolConfig: { retrievalConfig: { latLng: center, languageCode: "ja" } },
-    }),
-    cache: "no-store", signal: AbortSignal.timeout(25_000),
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: DETOUR_INSTRUCTION }] },
+    contents: [{ role: "user", parts: [{ text: detourPrompt(spots, region) }] }],
+    tools: [{ googleMaps: {} }],
+    toolConfig: { retrievalConfig: { latLng: center, languageCode: "ja" } },
   });
-  if (!response.ok) return [];
+  let response: Response | null = null;
+  for (const model of geminiDetourModels()) {
+    response = await fetch(`${GEMINI_ENDPOINT}/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey }, body,
+      cache: "no-store", signal: AbortSignal.timeout(25_000),
+    });
+    // モデル名が存在しない・グラウンディング非対応のときだけ次のモデルを試す。
+    if (response.ok || (response.status !== 400 && response.status !== 404)) break;
+  }
+  if (!response?.ok) return [];
   const data = await response.json() as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; groundingMetadata?: { groundingChunks?: Array<{ maps?: { uri?: string; title?: string; placeId?: string } }> } }>;
   };
@@ -159,7 +168,7 @@ const SEARCH_QUERIES = [
 ];
 
 /** Gemini のグラウンディングが使えないときの予備：Places API のテキスト検索で候補を集める。 */
-async function placesSearchCandidates(spots: readonly VerifiedSpot[], region: string, key: string) {
+async function placesSearchCandidates(spots: readonly DetourAnchor[], region: string, key: string) {
   const center = centroid(spots);
   const radius = Math.min(10_000, Math.max(2000, ...spots.map((spot) => metersBetween(center, spot) + 2000)));
   const results = await Promise.allSettled(SEARCH_QUERIES.map(async ({ query, feature }) => {
@@ -219,7 +228,7 @@ export type DetourSearchResult = { detours: VerifiedDetour[]; source: "gemini-ma
  * 1) Gemini + Google マップ グラウンディング → 2) 足りなければ Places テキスト検索 の順に試し、
  * どちらの候補も Places API の詳細で実在・営業状態・位置を確かめてから返す。
  */
-export async function searchLocalDetours(spots: VerifiedSpot[], region: string, visitDate: string, placesKey: string, geminiKey: string): Promise<DetourSearchResult> {
+export async function searchLocalDetours(spots: DetourAnchor[], region: string, visitDate: string, placesKey: string, geminiKey: string): Promise<DetourSearchResult> {
   const names = Object.fromEntries(spots.map((spot) => [spot.id, spot.name]));
   const seichiNames = new Set(spots.map((spot) => normalizeName(spot.name)));
   const accepted = new Map<string, VerifiedDetour>();
@@ -257,4 +266,27 @@ export async function searchLocalDetours(spots: VerifiedSpot[], region: string, 
   const detours = [...accepted.values()].slice(0, MAX_DETOUR_RESULTS);
   const source = sources.size === 2 ? "mixed" : sources.has("gemini-maps") ? "gemini-maps" : sources.has("places-search") ? "places-search" : "none";
   return { detours, source };
+}
+
+/**
+ * 調査リストの聖地（出典で確認した名称）の位置を Places API のテキスト検索で求める。
+ * 聖地かどうかの判断には使わず、寄り道探しと経路リンクの基準点にだけ使う。
+ */
+export async function locateResearchSpot(name: string, region: string, key: string): Promise<(DetourAnchor & { placeId: string; mapsUri: string | null }) | null> {
+  try {
+    const response = await fetch(`${PLACES_ENDPOINT}/places:searchText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.googleMapsUri" },
+      body: JSON.stringify({ textQuery: `${region.replace("・", " ")} ${name}`, languageCode: "ja", regionCode: "JP", maxResultCount: 1 }),
+      cache: "no-store", signal: AbortSignal.timeout(6000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as { places?: Array<{ id?: string; location?: { latitude?: number; longitude?: number }; googleMapsUri?: string }> };
+    const place = data.places?.[0];
+    const placeId = normalizePlaceId(place?.id);
+    const latitude = place?.location?.latitude;
+    const longitude = place?.location?.longitude;
+    if (!placeId || typeof latitude !== "number" || typeof longitude !== "number" || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { id: "", name, latitude, longitude, placeId, mapsUri: safeMapsUri(place?.googleMapsUri) };
+  } catch { return null; }
 }

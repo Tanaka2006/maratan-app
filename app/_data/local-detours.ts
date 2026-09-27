@@ -209,3 +209,39 @@ export function safeMapsUri(value: unknown): string | null {
     return url.toString();
   } catch { return null; }
 }
+
+/** 位置検索の結果が同じ地域にまとまっているものだけを残す（別の県の同名地点などを除く）。 */
+export function consistentAnchors<T extends Point>(anchors: readonly T[], maxMeters = 40_000): T[] {
+  if (anchors.length < 2) return [...anchors];
+  const scores = anchors.map((anchor) => anchors.filter((other) => metersBetween(anchor, other) <= maxMeters).length);
+  const best = Math.max(...scores);
+  // どれも離れているときは、最初に選んだ地点だけを基準にする。
+  if (best < 2) return [anchors[0]];
+  return anchors.filter((_, index) => scores[index] === best);
+}
+
+/**
+ * 聖地の訪問順に寄り道を差し込む。
+ * 「AとBの間」は2つが隣り合っていればその間に、「Aの前後」はAが先頭なら前、それ以外は後ろに入れる。
+ * 聖地の順番そのものは変えない。
+ */
+export function insertDetours(seichiOrder: readonly string[], detours: ReadonlyArray<{ id: string; detour_slot?: DetourSlot | null }>): string[] {
+  const result = [...seichiOrder];
+  for (const detour of detours) {
+    if (result.includes(detour.id)) continue;
+    const slot = detour.detour_slot;
+    const a = slot?.kind === "between" ? seichiOrder.indexOf(slot.fromId) : -1;
+    const b = slot?.kind === "between" ? seichiOrder.indexOf(slot.toId) : -1;
+    if (a >= 0 && b >= 0 && Math.abs(a - b) === 1) {
+      const later = seichiOrder[Math.max(a, b)];
+      result.splice(result.indexOf(later), 0, detour.id);
+      continue;
+    }
+    const anchor = slot?.kind === "near" ? slot.spotId : slot?.kind === "between" ? (a >= 0 ? slot.fromId : slot.toId) : null;
+    const position = anchor ? result.indexOf(anchor) : -1;
+    if (position < 0) result.push(detour.id);
+    else if (seichiOrder.length > 1 && anchor === seichiOrder[0]) result.splice(position, 0, detour.id);
+    else result.splice(position + 1, 0, detour.id);
+  }
+  return result;
+}

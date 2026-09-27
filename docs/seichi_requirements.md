@@ -127,6 +127,8 @@ AIが役割を持つのは**コース候補の選択と寄り道の探索・推�
 | 5 | 直線距離から「〇〇と△△の間」「〇〇の前後」のどこで寄ると遠回りが少ないかを示す | サーバー側の判定 |
 | 6 | 1～5で3件未満なら、Places APIのテキスト検索（郷土料理、和菓子・名物、酒蔵・地酒、伝統工芸体験、郷土資料館）で候補を集め、Geminiは候補IDの中から選んで紹介文だけを付ける | Places API Text Search ＋ Gemini（構造化出力） |
 
+座標をDBに持たない調査リストの作品・地域でも、要件の軸（聖地と地域スポットをつなぐコースの目安と、区間ごとのGoogleマップ確認）を使えるようにする。選んだ地点（出典付きの名称）の位置だけをPlaces APIのテキスト検索で推定し（地図APIで聖地そのものを探すことはしない）、同じ地域から大きく外れた検索結果は基準から除く。見つけた寄り道は、聖地の順番を変えずに「間」または「前後」に差し込み、寄り道を含む区間ごとのGoogleマップリンクを表示する。この場合、移動時間は計算せずGoogleマップでの確認を案内する。
+
 コース作成・再計算時（`POST /api/itinerary`）は、クライアントから受け取ったPlace IDだけを使い、Places APIで位置・営業状態・休業曜日を取り直す。寄り道の紹介文はAIの作成であり、作品との関係を示さないことと、店舗情報の出典がGoogleマップであることを画面に表示する。GeminiまたはPlaces APIが使えない場合、寄り道は「見つからない／取得できない」と表示し、基本コースは引き続き利用できる。Routes APIの設定がない場合は寄り道の候補とリンクだけを示し、コースへの追加はできない。
 
 運営者がCSVで地点を登録し、公開前に作品との関係、重複、座標、立入可否、リンクを確認する。閉店・立入禁止・誤登録を把握した地点は公開停止できるようにする。調査済みでも日本国内の聖地を網羅したとは表示しない。
@@ -159,7 +161,7 @@ AIが役割を持つのは**コース候補の選択と寄り道の探索・推�
 | ⑧ 寄り道を追加・削除 | `POST /api/itinerary` 再実行 → Places API・Routes API | Place IDから位置を取り直し、寄り道を含む隣接区間を再計算し必須聖地を残す。「おすすめの寄り道」は食1件・文化1件を優先 | 実装済み |
 | ⑨ 結果から地図を開く | Google Maps URLs | 地点・区間をGoogleマップで開く。同じ便が表示される保証はない | 実装済み。Maps URLsにAPIキーは不要 |
 
-`POST /api/itinerary` の入力は `{ workId, region, spotIds, visitDate, availableMinutes }`。レスポンスは `{ course, recommendation, source, notices }` または `{ error }`。サーバーは地点の座標・移動時間をDBから再取得し、クライアントの値を信用しない。`detourIds` には `POST /api/detours` が返したGoogleのPlace IDを最大2件渡す。`POST /api/detours` の入力は `{ workId, region, spotIds, visitDate }`、レスポンスは `{ detours, source, routable }` または `{ error }`。`GOOGLE_ROUTES_API_KEY`、`GOOGLE_PLACES_API_KEY`（未設定時はRoutesのキーを使う。Places API (New) の有効化が必要）、`GEMINI_API_KEY` はサーバー専用とする。寄り道検索の連打制限はプロセス内で1分3回。現在の連打制限はプロセス内の簡易実装（1分5回）であり、公開前に共有ストアを使う制限とGoogle Cloud／Gemini側の課金・利用上限を設定する。
+`POST /api/itinerary` の入力は `{ workId, region, spotIds, visitDate, availableMinutes }`。レスポンスは `{ course, recommendation, source, notices }` または `{ error }`。サーバーは地点の座標・移動時間をDBから再取得し、クライアントの値を信用しない。`detourIds` には `POST /api/detours` が返したGoogleのPlace IDを最大2件渡す。`POST /api/detours` の入力は `{ workId, region, spotIds | researchSpotIds, visitDate }`（`researchSpotIds` は調査リストの地点）、レスポンスは `{ detours, source, routable }` または `{ error }`。`GOOGLE_ROUTES_API_KEY`、`GOOGLE_PLACES_API_KEY`（未設定時はRoutesのキーを使う。Places API (New) の有効化が必要）、`GEMINI_API_KEY` はサーバー専用とする。寄り道検索の連打制限はプロセス内で1分3回。現在の連打制限はプロセス内の簡易実装（1分5回）であり、公開前に共有ストアを使う制限とGoogle Cloud／Gemini側の課金・利用上限を設定する。
 
 Routesの公共交通は代表時刻で検索した概算。対応期間外・地方路線欠落・徒歩経路の歩道情報不足を想定し、実際の乗車・帰着は保証しない。Geminiは計算済み候補の選択のみを担当する。
 

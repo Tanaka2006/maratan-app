@@ -260,11 +260,20 @@ ul.verified-detour-list { list-style: none; margin: 0; padding: 0; }
 .research-course-spot strong { font-size: 15px; }
 .research-course-spot small { color: #8d4a22; font-size: 13px; line-height: 1.6; }
 .research-course-spot .spot-links { margin-left: 30px; }
-.research-course-result { background: var(--orange-wash); border: 1px solid #f4dece; border-radius: 16px; padding: 20px; position: sticky; top: 84px; }
+.research-course-result { background: var(--orange-wash); border: 1px solid #f4dece; border-radius: 16px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 20px; position: sticky; top: 84px; }
 .research-course-result ol { list-style: none; margin: 0 0 16px; padding: 0; }
 .research-course-result li + li { margin-top: 4px; }
 .plan-stop { align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 10px; padding: 10px 12px; }
 .plan-stop strong { flex: 1; font-size: 15px; min-width: 0; overflow-wrap: anywhere; }
+.plan-stop-name { display: grid; flex: 1; min-width: 0; }
+.plan-stop-name small { color: var(--green); font-size: 12px; font-weight: 700; }
+.research-course-result li.is-detour .plan-stop { background: var(--green-soft); border-color: #bfdccf; }
+.research-course-result li.is-detour .stop-number { background: var(--green); }
+.research-detours { background: var(--green-soft); border: 1px solid #bfdccf; border-radius: 14px; margin-top: 18px; padding: 16px; }
+.research-detours h3 { font-size: 18px; margin: 0 0 10px; }
+.research-detours .secondary-button { margin: 6px 0 12px; width: 100%; }
+.research-date { color: var(--ink); display: grid; font-size: 14px; font-weight: 700; gap: 6px; }
+.research-date input { background: #fff; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); font-size: 16px; height: 44px; padding: 0 12px; }
 .order-buttons { display: flex; gap: 6px; }
 .order-buttons button { background: #fff; border: 1px solid var(--line-strong); border-radius: 9px; cursor: pointer; font-size: 16px; height: 40px; width: 40px; }
 .order-buttons button:disabled { color: #c9c1bb; cursor: default; }
@@ -283,7 +292,7 @@ footer small { color: #cfc6c0; font-size: 12px; }
 @media (max-width: 900px) {
   .research-grid { grid-template-columns: 1fr 1fr; }
   .research-course-layout { grid-template-columns: 1fr; }
-  .research-course-result { position: static; }
+  .research-course-result { max-height: none; overflow: visible; position: static; }
 }
 
 @media (max-width: 620px) {

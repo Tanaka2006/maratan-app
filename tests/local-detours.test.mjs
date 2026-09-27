@@ -93,3 +93,24 @@ test("Googleマップ以外へのリンクは表示しない", () => {
   assert.equal(safeMapsUri("https://evil.example.com/maps"), null);
   assert.equal(safeMapsUri("javascript:alert(1)"), null);
 });
+
+test("寄り道は聖地の順番を変えずに、間または前後へ差し込む", async () => {
+  const { insertDetours } = await import("../app/_data/local-detours.ts");
+  const between = { id: "d1", detour_slot: { kind: "between", fromId: "b", toId: "a" } };
+  const nearFirst = { id: "d2", detour_slot: { kind: "near", spotId: "a" } };
+  const nearLast = { id: "d3", detour_slot: { kind: "near", spotId: "c" } };
+  assert.deepEqual(insertDetours(["a", "b", "c"], [between]), ["a", "d1", "b", "c"]);
+  assert.deepEqual(insertDetours(["a", "b", "c"], [nearFirst, nearLast]), ["d2", "a", "b", "c", "d3"]);
+  // 隣り合っていない2地点の「間」は、片方の前後に入れる
+  assert.deepEqual(insertDetours(["a", "c", "b"], [between]), ["a", "c", "b", "d1"]);
+  assert.deepEqual(insertDetours(["a"], [nearFirst]), ["a", "d2"]);
+});
+
+test("位置検索で別の地域に外れた地点は基準から除く", async () => {
+  const { consistentAnchors } = await import("../app/_data/local-detours.ts");
+  const hida = [{ id: "x", latitude: 36.2381, longitude: 137.1866 }, { id: "y", latitude: 36.2372, longitude: 137.1895 }];
+  const far = { id: "z", latitude: 35.6812, longitude: 139.7671 };
+  assert.deepEqual(consistentAnchors([...hida, far]).map((a) => a.id), ["x", "y"]);
+  assert.deepEqual(consistentAnchors([hida[0]]).map((a) => a.id), ["x"]);
+  assert.deepEqual(consistentAnchors([hida[0], far]).map((a) => a.id), ["x"]);
+});
