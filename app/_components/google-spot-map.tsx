@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { VerifiedSpot } from "../_data/anilist-types";
 
 type MapInstance = { fitBounds: (bounds: unknown, padding?: number) => void; panTo: (center: { lat: number; lng: number }) => void };
@@ -16,6 +16,15 @@ type GoogleMaps = {
 
 let loader: Promise<GoogleMaps> | null = null;
 
+// キーの制限・無効化などで Google マップの認証に失敗したときは、Google が gm_authFailure を呼ぶ。
+// そのときは Google のエラー画面を出さず、OpenStreetMap の地図に切り替える。
+let authFailed = false;
+const authListeners = new Set<() => void>();
+function subscribeAuthFailure(listener: () => void) {
+  authListeners.add(listener);
+  return () => { authListeners.delete(listener); };
+}
+
 function loadGoogleMaps(key: string): Promise<GoogleMaps> {
   if (loader) return loader;
   loader = new Promise((resolve, reject) => {
@@ -23,6 +32,7 @@ function loadGoogleMaps(key: string): Promise<GoogleMaps> {
     if (existing) { resolve(existing); return; }
     const callbackName = "__machipoMapsReady";
     const target = window as unknown as Record<string, unknown>;
+    target.gm_authFailure = () => { authFailed = true; for (const listener of authListeners) listener(); };
     target[callbackName] = () => { delete target[callbackName]; resolve((window as unknown as { google: { maps: GoogleMaps } }).google.maps); };
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({ key, loading: "async", callback: callbackName, libraries: "marker", v: "weekly", language: "ja" })}`;
@@ -75,6 +85,7 @@ export default function GoogleSpotMap({ spots, detours = [], activeId, onSelect,
   const onSelectRef = useRef(onSelect);
   const activeRef = useRef(activeId);
   const [failed, setFailed] = useState(false);
+  const authFailure = useSyncExternalStore(subscribeAuthFailure, () => authFailed, () => false);
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
 
   useEffect(() => { onSelectRef.current = onSelect; activeRef.current = activeId; }, [onSelect, activeId]);
@@ -125,6 +136,6 @@ export default function GoogleSpotMap({ spots, detours = [], activeId, onSelect,
     if (active && map.current) map.current.panTo({ lat: active.latitude, lng: active.longitude });
   }, [activeId, spots]);
 
-  if (!key || failed) return <>{fallback}</>;
+  if (!key || failed || authFailure) return <>{fallback}</>;
   return <div ref={element} className="google-spot-map" role="region" aria-label="聖地の地図。番号は下の一覧と対応しています。「食」「文」などのピンは地域の寄り道です。" />;
 }
