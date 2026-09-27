@@ -393,3 +393,13 @@ footer small { color: #cfc6c0; font-size: 12px; }
 .review-summary p { color: #4f4640; display: -webkit-box; font-size: 13px; line-height: 1.7; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .review-summary small { color: var(--muted); display: block; font-size: 11px; margin-top: 2px; }
 .review-summary a { color: var(--orange-deep); font-weight: 700; }
+.search-mode-tabs { background: #f4efea; border-radius: 999px; display: inline-flex; gap: 4px; margin-bottom: 14px; padding: 4px; }
+.search-mode-tabs button { background: transparent; border: 0; border-radius: 999px; color: var(--muted); cursor: pointer; font-size: 14px; font-weight: 800; min-height: 40px; padding: 6px 18px; }
+.search-mode-tabs button.is-active { background: #fff; box-shadow: var(--shadow-sm); color: var(--orange-deep); }
+.detour-search-section { margin-bottom: 8px; }
+.detour-search-form { background: #fff; margin-bottom: 18px; }
+.detour-search-form button { background: var(--orange); border: 0; border-radius: 10px; color: #fff; cursor: pointer; flex: 0 0 auto; font-size: 14px; font-weight: 800; min-height: 40px; padding: 0 16px; }
+.detour-search-form button:disabled { background: #ddd6d1; color: #7d746e; cursor: not-allowed; }
+.detour-result .work-version { align-items: center; display: flex; gap: 8px; }
+.detour-result-text { color: #4f4640; font-size: 14px; line-height: 1.7; margin: 6px 0 0; }
+.sr-only { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }

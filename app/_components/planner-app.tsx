@@ -6,6 +6,7 @@ import type { MatchedWork, VerifiedLeg, VerifiedSpot } from "../_data/anilist-ty
 import type { ResearchCatalog, ResearchWork } from "../_data/research-works";
 import { displayVersion, matchesGenre, workTypeLabel, type GenreFilter } from "../_data/work-genres";
 import AniListLookup from "./anilist-lookup";
+import DetourSearch from "./detour-search";
 import ResearchCourse from "./research-course";
 import VerifiedSpotMap from "./verified-spot-map";
 
@@ -47,6 +48,7 @@ function PinIcon() {
 
 export default function PlannerApp({ researchCatalog }: { researchCatalog: ResearchCatalog }) {
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<"works" | "detours">("works");
   const [genreFilter, setGenreFilter] = useState<GenreFilter>("すべて");
   const [selection, setSelection] = useState<VerifiedSelection | null>(null);
   const [researchSelection, setResearchSelection] = useState<{ work: ResearchWork; region: string } | null>(null);
@@ -209,6 +211,12 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
             <h1><span>あの物語の場所から、</span><span><em>まちの魅力</em>へ。</span></h1>
             <p className="lead">作品を選ぶだけで、聖地めぐりと、途中で寄れる地元の味・文化スポットをつないだコースを作れます。</p>
 
+            <div className="search-mode-tabs" role="tablist" aria-label="探し方">
+              <button type="button" role="tab" aria-selected={searchMode === "works"} className={searchMode === "works" ? "is-active" : ""} onClick={() => setSearchMode("works")}>作品から探す</button>
+              <button type="button" role="tab" aria-selected={searchMode === "detours"} className={searchMode === "detours" ? "is-active" : ""} onClick={() => setSearchMode("detours")}>食・お店から探す</button>
+            </div>
+
+            {searchMode === "detours" ? <DetourSearch onOpen={(workId, region) => void openWork(workId, region)} openingKey={openingKey} /> : <>
             <div className="search-panel">
               <label htmlFor="work-search">作品名や地域から探す</label>
               <div className="search-controls">
@@ -254,6 +262,8 @@ export default function PlannerApp({ researchCatalog }: { researchCatalog: Resea
 
               {!filtering && matchingWorks.length > visibleWorks.length ? <button className="more-button" type="button" onClick={() => setShowAll(true)}>すべての作品を見る（全{matchingWorks.length}作品）</button> : null}
             </section>
+            </>}
+            {searchMode === "detours" && openError ? <p className="inline-error" role="alert">{openError}</p> : null}
 
             <details className="detail-disclosure scope-disclosure"><summary>コースの作り方と注意点</summary><div className="disclosure-body">
               <p>作品と地域を選び、巡りたい聖地を最大3件選ぶと、訪問順の案を作ります。聖地の間や前後で寄れる地元の味・文化スポットは、AI（Gemini）がGoogleマップの情報から探します。</p>
