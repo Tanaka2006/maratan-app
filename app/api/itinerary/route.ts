@@ -9,6 +9,7 @@ type Input = { workId: string; region: string; spotIds: string[]; detourIds?: st
 
 const requestTimes = new Map<string, number[]>();
 const LIMIT_PER_MINUTE = 5;
+const LONG_WALK_METERS = 3000;
 
 function rateLimited(ip: string) {
   const now = Date.now();
@@ -204,7 +205,7 @@ export async function POST(request: Request) {
     }
     const stops = [...spots.map((spot) => ({ ...spot, kind: "seichi" as const })), ...detours];
     const closed = stops.filter((spot) => isKnownClosed(spot, input.visitDate));
-    if (closed.length) return Response.json({ status: "over", error: `${closed.map((spot) => spot.name).join("、")}は登録済みの休業日です。訪問日を変更してください。` }, { status: 422 });
+    if (closed.length) return Response.json({ status: "closed", error: `${closed.map((spot) => spot.name).join("、")}は選んだ日が休業日です。訪問日を変更してください。` }, { status: 422 });
 
     const routeKey = process.env.GOOGLE_ROUTES_API_KEY;
     const byPair = new Map<string, RouteLeg>();
@@ -255,18 +256,19 @@ export async function POST(request: Request) {
     const detourPricesKnown = course.stops.every((spot) => spot.kind !== "detour" || typeof spot.reference_price_yen === "number");
     const transitKnown = course.legs.every((leg) => leg.mode !== "transit" || leg.fareYen !== null);
     const conditionsKnown = course.stops.every((spot) => spot.hours_status === "no_hours" && spot.reservation_status === "not_required");
-    const status = course.totalMinutes > input.availableMinutes ? "over" : admissionKnown && detourPricesKnown && transitKnown && conditionsKnown ? "fits" : "needs-check";
+    const longestWalk = Math.max(0, ...course.legs.map((leg) => leg.mode === "walking" ? leg.walkingMeters ?? 0 : 0));
+    const longWalk = longestWalk > LONG_WALK_METERS;
+    const status = course.totalMinutes > input.availableMinutes ? "over" : admissionKnown && detourPricesKnown && transitKnown && conditionsKnown && !longWalk ? "fits" : "needs-check";
     return Response.json({ course, recommendation, source, status,
       stayMinutes: Object.fromEntries(stops.map((spot) => [spot.id, input.stayMinutes?.[spot.id] ?? spot.stay_minutes])),
       costs: { transitYen: transitKnown ? course.legs.reduce((sum, leg) => sum + (leg.fareYen ?? 0), 0) : null,
         admissionYen: admissionKnown ? course.stops.reduce((sum, spot) => sum + (spot.admission_yen ?? 0), 0) : null,
         foodExperienceYen: detourPricesKnown ? course.stops.reduce((sum, spot) => sum + (spot.kind === "detour" ? spot.reference_price_yen ?? 0 : 0), 0) : null },
       notices: [
-      stops.length === 1 ? "訪問地点が1件のため地点間移動はありません。" : source === "google-routes" ? "Google Routesの代表時刻による概算です。当日の便・待ち時間はGoogleマップで確認してください。" : "登録済み区間を含みます。出典を確認し、Googleマップ側で訪問日時を指定してください。",
-      !conditionsKnown ? "営業時間・最終入場・予約要否には未確認項目があります。公式情報を確認してください。" : null,
-      !admissionKnown || !detourPricesKnown || !transitKnown ? "費用の不明項目は0円扱いしていません。" : null,
-      course.legs.length && course.legs.every((leg) => leg.mode === "walking") ? "このコースの採用区間はすべて徒歩です。公共交通の便は提案に含めていません。" : null,
-      "最初の地点までと最後の地点からの移動、および帰着時刻は判定していません。",
+      stops.length === 1 ? "訪問地点が1件のため、地点間の移動はありません。" : source !== "google-routes" ? "移動時間に登録済みの区間データを含みます。各区間の出典も確認してください。" : null,
+      longWalk ? `徒歩で約${(longestWalk / 1000).toFixed(1)}km歩く区間があります。体力や天候に合わせて、バスやタクシーも検討してください。` : null,
+      !conditionsKnown ? "営業時間・最終入場・予約の要否は、まだ確認できていない地点があります。" : null,
+      !longWalk && course.legs.length && course.legs.every((leg) => leg.mode === "walking") ? "このコースはすべて徒歩の区間です。電車・バスのほうが楽な場合もあるため、Googleマップでも確認してください。" : null,
     ].filter((notice): notice is string => notice !== null) }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ status: "unavailable", error: "コースデータを取得できませんでした。時間をおいて再試行してください。" }, { status: 503 });

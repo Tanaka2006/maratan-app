@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "まちぽ｜物語の場所から、まちを歩こう。",
-  description: "聖地と地域の魅力をつなぐ、まち歩きコース作成アプリ。",
-  icons: { icon: "/app-icon.png", apple: "/app-icon.png" },
+  description: "作品と地域を選ぶと、聖地を巡る順番と移動時間の目安が分かるまち歩きコース作成アプリ。",
+  icons: { apple: "/app-icon.png" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

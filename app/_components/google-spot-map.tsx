@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { VerifiedSpot } from "../_data/anilist-types";
 
-type MapInstance = { fitBounds: (bounds: unknown) => void; setCenter: (center: { lat: number; lng: number }) => void; setZoom: (zoom: number) => void };
+type MapInstance = { fitBounds: (bounds: unknown, padding?: number) => void; panTo: (center: { lat: number; lng: number }) => void };
+type Marker = { map: MapInstance | null; zIndex?: number | null; addListener: (event: string, listener: () => void) => void };
 type GoogleMaps = {
   Map: new (element: HTMLElement, options: Record<string, unknown>) => MapInstance;
   LatLngBounds: new () => { extend: (point: { lat: number; lng: number }) => void };
   importLibrary: (name: string) => Promise<unknown>;
   marker: {
-    AdvancedMarkerElement: new (options: Record<string, unknown>) => { map: MapInstance | null };
-    PinElement: new (options: Record<string, unknown>) => { element: HTMLElement };
+    AdvancedMarkerElement: new (options: Record<string, unknown>) => Marker;
   };
 };
 
@@ -33,6 +33,22 @@ function loadGoogleMaps(key: string): Promise<GoogleMaps> {
   return loader;
 }
 
+function pinElement(label: string, name: string) {
+  const pin = document.createElement("div");
+  pin.className = "map-number-pin";
+  pin.textContent = label;
+  pin.setAttribute("aria-label", name);
+  return pin;
+}
+
+function highlightMarkers(list: Array<{ id: string; marker: Marker; pin: HTMLElement }>, activeId: string) {
+  for (const { id, marker, pin } of list) {
+    const active = id === activeId;
+    pin.classList.toggle("is-active", active);
+    marker.zIndex = active ? 10 : null;
+  }
+}
+
 export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
   spots: VerifiedSpot[];
   activeId: string;
@@ -41,38 +57,48 @@ export default function GoogleSpotMap({ spots, activeId, onSelect, fallback }: {
 }) {
   const element = useRef<HTMLDivElement | null>(null);
   const map = useRef<MapInstance | null>(null);
-  const markers = useRef<Array<{ map: MapInstance | null }>>([]);
+  const markers = useRef<Array<{ id: string; marker: Marker; pin: HTMLElement }>>([]);
+  const onSelectRef = useRef(onSelect);
+  const activeRef = useRef(activeId);
   const [failed, setFailed] = useState(false);
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
 
+  useEffect(() => { onSelectRef.current = onSelect; activeRef.current = activeId; }, [onSelect, activeId]);
+
   useEffect(() => {
-    if (!key || !element.current) return;
+    if (!key || !element.current || !spots.length) return;
     let disposed = false;
     void loadGoogleMaps(key).then(async (maps) => {
       await maps.importLibrary("maps");
       await maps.importLibrary("marker");
       if (disposed || !element.current) return;
-      const active = spots[0];
-      map.current = new maps.Map(element.current, { center: { lat: active.latitude, lng: active.longitude }, zoom: 14, mapId: process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || "DEMO_MAP_ID" });
+      const first = spots[0];
+      map.current = new maps.Map(element.current, {
+        center: { lat: first.latitude, lng: first.longitude }, zoom: 15,
+        mapId: process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || "DEMO_MAP_ID",
+        clickableIcons: false, mapTypeControl: false, streetViewControl: false, gestureHandling: "cooperative",
+      });
       const bounds = new maps.LatLngBounds();
-      markers.current = spots.map((spot) => {
+      markers.current = spots.map((spot, index) => {
         const point = { lat: spot.latitude, lng: spot.longitude };
         bounds.extend(point);
-        const pin = new maps.marker.PinElement({ background: "#f8c2a0", borderColor: "#dd6a22", glyphColor: "#ffffff" });
-        const marker = new maps.marker.AdvancedMarkerElement({ map: map.current, position: point, title: spot.name, content: pin.element });
-        (marker as unknown as { addListener: (event: string, listener: () => void) => void }).addListener("click", () => onSelect(spot.id));
-        return marker;
+        const pin = pinElement(String(index + 1), spot.name);
+        const marker = new maps.marker.AdvancedMarkerElement({ map: map.current, position: point, title: spot.name, content: pin, gmpClickable: true });
+        marker.addListener("click", () => onSelectRef.current(spot.id));
+        return { id: spot.id, marker, pin };
       });
-      if (spots.length > 1) map.current.fitBounds(bounds);
+      highlightMarkers(markers.current, activeRef.current);
+      if (spots.length > 1) map.current.fitBounds(bounds, 60);
     }).catch(() => { if (!disposed) setFailed(true); });
-    return () => { disposed = true; for (const marker of markers.current) marker.map = null; markers.current = []; map.current = null; };
-  }, [key, spots, onSelect]);
+    return () => { disposed = true; for (const { marker } of markers.current) marker.map = null; markers.current = []; map.current = null; };
+  }, [key, spots]);
 
   useEffect(() => {
+    highlightMarkers(markers.current, activeId);
     const active = spots.find((spot) => spot.id === activeId);
-    if (active && map.current) { map.current.setCenter({ lat: active.latitude, lng: active.longitude }); map.current.setZoom(15); }
+    if (active && map.current) map.current.panTo({ lat: active.latitude, lng: active.longitude });
   }, [activeId, spots]);
 
   if (!key || failed) return <>{fallback}</>;
-  return <div ref={element} className="google-spot-map" role="img" aria-label="確認済み聖地の地図。地点リストからも選択できます。" />;
+  return <div ref={element} className="google-spot-map" role="region" aria-label="聖地の地図。番号は下の一覧と対応しています。" />;
 }
